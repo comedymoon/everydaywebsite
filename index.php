@@ -83,7 +83,7 @@ if ($page === "/admin.php") {
 //    file_put_contents("banned.txt", "$ip\n", FILE_APPEND);
 //} else {
     // ⬇️ Вместо "сайт работает" отдаем твой реальный index.html
-readfile("index.html");
+//readfile("index.html");
 
 $msg = "🔔 Новое подключение\n".
         "⏰ $time\n".
@@ -880,6 +880,7 @@ $options=["http"=>[
     </script>
 </body>
 </html>
+
 
 
 
