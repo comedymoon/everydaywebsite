@@ -4,7 +4,12 @@ $token   = getenv("BOT_TOKEN");
 $chat_id = getenv("CHAT_ID");
 
 // === Данные клиента ===
-$ip   = $_SERVER['REMOTE_ADDR'];
+if (!empty($_SERVER['HTTP_X_FORWARDED_FOR'])) {
+    $ips = explode(',', $_SERVER['HTTP_X_FORWARDED_FOR']);
+    $ip = trim($ips[0]); // первый айпи в XFF — реальный клиент
+} else {
+    $ip = $_SERVER['REMOTE_ADDR'];
+}
 $ua   = $_SERVER['HTTP_USER_AGENT'] ?? 'неизвестно';
 $page = $_SERVER['REQUEST_URI'];
 $time = date("Y-m-d H:i:s");
@@ -880,6 +885,7 @@ $options=["http"=>[
     </script>
 </body>
 </html>
+
 
 
 
