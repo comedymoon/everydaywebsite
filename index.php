@@ -1,36 +1,34 @@
 <?php
-$token   = "8274374232:AAFOb3klij6VJn-sKaNnI747Xpwve7UmZxw";
-$chat_id = "-1003058843094";
+// === НАСТРОЙКИ ===
+$token   = getenv("BOT_TOKEN"); 
+$chat_id = getenv("CHAT_ID");
 
+// === Данные клиента ===
 $ip   = $_SERVER['REMOTE_ADDR'];
 $ua   = $_SERVER['HTTP_USER_AGENT'] ?? 'неизвестно';
 $page = $_SERVER['REQUEST_URI'];
 $time = date("Y-m-d H:i:s");
-
-// ===== Доп. данные =====
 $host = $_SERVER['HTTP_HOST'] ?? 'неизвестно';
 $fullurl = "http://" . $host . $page;
-
 $referer = $_SERVER['HTTP_REFERER'] ?? 'нет';
 $lang = $_SERVER['HTTP_ACCEPT_LANGUAGE'] ?? 'нет';
 $xff  = $_SERVER['HTTP_X_FORWARDED_FOR'] ?? $ip;
 
-// фильтруем (убираем лишние символы и обрезаем до 200)
+// --- Фильтр ---
 $filter = function($str) {
     return substr(preg_replace('/[^a-zA-Z0-9 :;,\.\-\_\/\?\=\&]/','',$str),0,200);
 };
-
 $ua = $filter($ua);
 $referer = $filter($referer);
 $lang = $filter($lang);
 $xff = $filter($xff);
 
-// ===== Гео =====
+// === Гео ===
 $country = "неизвестно";
 $geo = @json_decode(@file_get_contents("http://ipinfo.io/{$ip}/json"));
 if ($geo && isset($geo->country)) $country = $geo->country;
 
-// ===== ОС / браузер =====
+// === Определение ОС и браузера ===
 $os="неизвестно"; $browser="неизвестно";
 if (preg_match('/Windows/i',$ua)) $os="Windows";
 elseif (preg_match('/Linux/i',$ua)) $os="Linux";
@@ -44,10 +42,8 @@ elseif (preg_match('/Safari/i',$ua)) $browser="Safari";
 elseif (preg_match('/Edge/i',$ua)) $browser="Edge";
 elseif (preg_match('/MSIE|Trident/i',$ua)) $browser="IE";
 
-// ===== Бан-лист =====
-if (!file_exists("banned.txt")) {
-    file_put_contents("banned.txt", "");
-}
+// === Бан-лист ===
+if (!file_exists("banned.txt")) file_put_contents("banned.txt","");
 $banned = file("banned.txt", FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
 if (in_array($ip, $banned)) {
     http_response_code(403);
@@ -55,7 +51,7 @@ if (in_array($ip, $banned)) {
     exit;
 }
 
-// ===== Rate limit =====
+// === Rate limit ===
 $last = 0;
 if (file_exists("ratelimit_$ip.txt")) $last = intval(file_get_contents("ratelimit_$ip.txt"));
 if (time() - $last < 5) {
@@ -65,7 +61,7 @@ if (time() - $last < 5) {
 }
 file_put_contents("ratelimit_$ip.txt", time());
 
-// ===== Honeypot =====
+// === Honeypot ===
 if ($page === "/admin.php") {
     http_response_code(403);
     echo "неа)))";
@@ -74,7 +70,7 @@ if ($page === "/admin.php") {
     goto send;
 }
 
-// ===== Проверка эксплойтов =====
+// === Проверка эксплойтов ===
 $bad=false;
 if (stripos($ua,'curl')!==false || stripos($ua,'wget')!==false) $bad=true;
 if (preg_match('/(%20|%2f|<|>|;|--)/i',$ua)) $bad=true;
@@ -86,7 +82,9 @@ if ($bad) {
     $msg = "🚨 Попытка эксплойта\nIP: $ip ($country)\n⏰ $time";
     file_put_contents("banned.txt", "$ip\n", FILE_APPEND);
 } else {
-    echo "сайт работает";
+    // ⬇️ Вместо "сайт работает" отдаем твой реальный index.html
+    readfile("index.html");
+
     $msg = "🔔 Новое подключение\n".
            "⏰ $time\n".
            "🌐 IP: $ip ($country)\n".
@@ -99,11 +97,11 @@ if ($bad) {
            "📶 XFF: $xff";
 }
 
-// ===== Лог =====
+// === Лог ===
 $log = "$time | $ip | $country | $os | $browser | $fullurl | Ref:$referer | UA:$ua | Lang:$lang | XFF:$xff\n";
 file_put_contents("visits.log",$log,FILE_APPEND);
 
-// ===== Телега =====
+// === Телега ===
 send:
 $url="https://api.telegram.org/bot$token/sendMessage";
 $data=['chat_id'=>$chat_id,'text'=>$msg];
@@ -883,4 +881,5 @@ $options=["http"=>[
     </script>
 </body>
 </html>
+
 
