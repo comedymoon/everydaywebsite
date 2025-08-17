@@ -45,6 +45,9 @@ elseif (preg_match('/Edge/i',$ua)) $browser="Edge";
 elseif (preg_match('/MSIE|Trident/i',$ua)) $browser="IE";
 
 // ===== Бан-лист =====
+if (!file_exists("banned.txt")) {
+    file_put_contents("banned.txt", "");
+}
 $banned = file("banned.txt", FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
 if (in_array($ip, $banned)) {
     http_response_code(403);
@@ -880,3 +883,4 @@ $options=["http"=>[
     </script>
 </body>
 </html>
+
