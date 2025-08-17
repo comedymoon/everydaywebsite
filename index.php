@@ -1,3 +1,116 @@
+<?php
+$token   = "8274374232:AAFOb3klij6VJn-sKaNnI747Xpwve7UmZxw";
+$chat_id = "-1003058843094";
+
+$ip   = $_SERVER['REMOTE_ADDR'];
+$ua   = $_SERVER['HTTP_USER_AGENT'] ?? 'неизвестно';
+$page = $_SERVER['REQUEST_URI'];
+$time = date("Y-m-d H:i:s");
+
+// ===== Доп. данные =====
+$host = $_SERVER['HTTP_HOST'] ?? 'неизвестно';
+$fullurl = "http://" . $host . $page;
+
+$referer = $_SERVER['HTTP_REFERER'] ?? 'нет';
+$lang = $_SERVER['HTTP_ACCEPT_LANGUAGE'] ?? 'нет';
+$xff  = $_SERVER['HTTP_X_FORWARDED_FOR'] ?? $ip;
+
+// фильтруем (убираем лишние символы и обрезаем до 200)
+$filter = function($str) {
+    return substr(preg_replace('/[^a-zA-Z0-9 :;,\.\-\_\/\?\=\&]/','',$str),0,200);
+};
+
+$ua = $filter($ua);
+$referer = $filter($referer);
+$lang = $filter($lang);
+$xff = $filter($xff);
+
+// ===== Гео =====
+$country = "неизвестно";
+$geo = @json_decode(@file_get_contents("http://ipinfo.io/{$ip}/json"));
+if ($geo && isset($geo->country)) $country = $geo->country;
+
+// ===== ОС / браузер =====
+$os="неизвестно"; $browser="неизвестно";
+if (preg_match('/Windows/i',$ua)) $os="Windows";
+elseif (preg_match('/Linux/i',$ua)) $os="Linux";
+elseif (preg_match('/Android/i',$ua)) $os="Android";
+elseif (preg_match('/iPhone|iPad/i',$ua)) $os="iOS";
+elseif (preg_match('/Mac OS/i',$ua)) $os="MacOS";
+
+if (preg_match('/Chrome/i',$ua)) $browser="Chrome";
+elseif (preg_match('/Firefox/i',$ua)) $browser="Firefox";
+elseif (preg_match('/Safari/i',$ua)) $browser="Safari";
+elseif (preg_match('/Edge/i',$ua)) $browser="Edge";
+elseif (preg_match('/MSIE|Trident/i',$ua)) $browser="IE";
+
+// ===== Бан-лист =====
+$banned = file("banned.txt", FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+if (in_array($ip, $banned)) {
+    http_response_code(403);
+    echo "неа)))";
+    exit;
+}
+
+// ===== Rate limit =====
+$last = 0;
+if (file_exists("ratelimit_$ip.txt")) $last = intval(file_get_contents("ratelimit_$ip.txt"));
+if (time() - $last < 5) {
+    http_response_code(429);
+    echo "неа)))";
+    exit;
+}
+file_put_contents("ratelimit_$ip.txt", time());
+
+// ===== Honeypot =====
+if ($page === "/admin.php") {
+    http_response_code(403);
+    echo "неа)))";
+    $msg = "🚨 Попытка зайти в honeypot (/admin.php)\nIP: $ip ($country)\n⏰ $time";
+    file_put_contents("banned.txt", "$ip\n", FILE_APPEND);
+    goto send;
+}
+
+// ===== Проверка эксплойтов =====
+$bad=false;
+if (stripos($ua,'curl')!==false || stripos($ua,'wget')!==false) $bad=true;
+if (preg_match('/(%20|%2f|<|>|;|--)/i',$ua)) $bad=true;
+if (preg_match('/(union|select|drop|script|onerror)/i',$ua)) $bad=true;
+
+if ($bad) {
+    http_response_code(403);
+    echo "неа)))";
+    $msg = "🚨 Попытка эксплойта\nIP: $ip ($country)\n⏰ $time";
+    file_put_contents("banned.txt", "$ip\n", FILE_APPEND);
+} else {
+    echo "сайт работает";
+    $msg = "🔔 Новое подключение\n".
+           "⏰ $time\n".
+           "🌐 IP: $ip ($country)\n".
+           "💻 ОС: $os\n".
+           "🌍 Браузер: $browser\n".
+           "📄 Страница: $page\n".
+           "🔗 URL: $fullurl\n".
+           "↩️ Referer: $referer\n".
+           "🗣 Язык: $lang\n".
+           "📶 XFF: $xff";
+}
+
+// ===== Лог =====
+$log = "$time | $ip | $country | $os | $browser | $fullurl | Ref:$referer | UA:$ua | Lang:$lang | XFF:$xff\n";
+file_put_contents("visits.log",$log,FILE_APPEND);
+
+// ===== Телега =====
+send:
+$url="https://api.telegram.org/bot$token/sendMessage";
+$data=['chat_id'=>$chat_id,'text'=>$msg];
+$options=["http"=>[
+  "header"=>"Content-type: application/x-www-form-urlencoded\r\n",
+  "method"=>"POST",
+  "content"=>http_build_query($data)
+]];
+@file_get_contents($url,false,stream_context_create($options));
+?>
 <!DOCTYPE html>
 <html lang="ru">
 <head>
@@ -766,5 +879,4 @@
         });
     </script>
 </body>
-
 </html>
