@@ -45,21 +45,21 @@ elseif (preg_match('/MSIE|Trident/i',$ua)) $browser="IE";
 // === Бан-лист ===
 if (!file_exists("banned.txt")) file_put_contents("banned.txt","");
 $banned = file("banned.txt", FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
-if (in_array($ip, $banned)) {
-    http_response_code(403);
-    echo "неа)))";
-    exit;
-}
+//if (in_array($ip, $banned)) {
+//    http_response_code(403);
+//    echo "неа)))";
+//    exit;
+//}
 
 // === Rate limit ===
-$last = 0;
-if (file_exists("ratelimit_$ip.txt")) $last = intval(file_get_contents("ratelimit_$ip.txt"));
-if (time() - $last < 5) {
-    http_response_code(429);
-    echo "неа)))";
-    exit;
-}
-file_put_contents("ratelimit_$ip.txt", time());
+//$last = 0;
+//if (file_exists("ratelimit_$ip.txt")) $last = intval(file_get_contents("ratelimit_$ip.txt"));
+//if (time() - $last < 5) {
+//    http_response_code(429);
+//    echo "неа)))";
+//    exit;
+//}
+//file_put_contents("ratelimit_$ip.txt", time());
 
 // === Honeypot ===
 if ($page === "/admin.php") {
@@ -71,31 +71,30 @@ if ($page === "/admin.php") {
 }
 
 // === Проверка эксплойтов ===
-$bad=false;
-if (stripos($ua,'curl')!==false || stripos($ua,'wget')!==false) $bad=true;
-if (preg_match('/(%20|%2f|<|>|;|--)/i',$ua)) $bad=true;
-if (preg_match('/(union|select|drop|script|onerror)/i',$ua)) $bad=true;
+//$bad=false;
+//if (stripos($ua,'curl')!==false || stripos($ua,'wget')!==false) $bad=true;
+//if (preg_match('/(%20|%2f|<|>|;|--)/i',$ua)) $bad=true;
+//if (preg_match('/(union|select|drop|script|onerror)/i',$ua)) $bad=true;
 
-if ($bad) {
-    http_response_code(403);
-    echo "неа)))";
-    $msg = "🚨 Попытка эксплойта\nIP: $ip ($country)\n⏰ $time";
-    file_put_contents("banned.txt", "$ip\n", FILE_APPEND);
-} else {
+//if ($bad) {
+//    http_response_code(403);
+//    echo "неа)))";
+//    $msg = "🚨 Попытка эксплойта\nIP: $ip ($country)\n⏰ $time";
+//    file_put_contents("banned.txt", "$ip\n", FILE_APPEND);
+//} else {
     // ⬇️ Вместо "сайт работает" отдаем твой реальный index.html
-    readfile("index.html");
+readfile("index.html");
 
-    $msg = "🔔 Новое подключение\n".
-           "⏰ $time\n".
-           "🌐 IP: $ip ($country)\n".
-           "💻 ОС: $os\n".
-           "🌍 Браузер: $browser\n".
-           "📄 Страница: $page\n".
-           "🔗 URL: $fullurl\n".
-           "↩️ Referer: $referer\n".
-           "🗣 Язык: $lang\n".
-           "📶 XFF: $xff";
-}
+$msg = "🔔 Новое подключение\n".
+        "⏰ $time\n".
+        "🌐 IP: $ip ($country)\n".
+        "💻 ОС: $os\n".
+        "🌍 Браузер: $browser\n".
+        "📄 Страница: $page\n".
+        "🔗 URL: $fullurl\n".
+        "↩️ Referer: $referer\n".
+        "🗣 Язык: $lang\n".
+        "📶 XFF: $xff";
 
 // === Лог ===
 $log = "$time | $ip | $country | $os | $browser | $fullurl | Ref:$referer | UA:$ua | Lang:$lang | XFF:$xff\n";
@@ -881,5 +880,6 @@ $options=["http"=>[
     </script>
 </body>
 </html>
+
 
 
