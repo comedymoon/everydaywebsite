@@ -31,11 +31,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (isset($_POST['clear_visits'])) file_put_contents($visitFile,"");
     if (isset($_POST['clear_debug']))  file_put_contents($debugFile,"");
 
-    // Установить режим защиты
-    if (isset($_POST['mode'])) {
-        $config = ['mode'=>$_POST['mode']];
-        file_put_contents($configFile, json_encode($config));
-    }
     header("Location: panel.php");
     exit;
 }
@@ -63,18 +58,6 @@ $mode   = $config['mode'] ?? 'medium';
 </head>
 <body>
   <h1>Админ-панель сайта</h1>
-
-  <div class="section">
-    <h2>⚡ Защита от DDoS</h2>
-    <form method="post">
-      <select name="mode">
-        <option value="easy"   <?= $mode==="easy"?"selected":"" ?>>Мягкая (10 req/s)</option>
-        <option value="medium" <?= $mode==="medium"?"selected":"" ?>>Средняя (5 req/s)</option>
-        <option value="hard"   <?= $mode==="hard"?"selected":"" ?>>Жёсткая (2 req/s)</option>
-      </select>
-      <button type="submit">Применить</button>
-    </form>
-  </div>
 
   <div class="section">
     <h2>🚫 Бан-лист</h2>
