@@ -5,7 +5,10 @@
  */
 declare(strict_types=1);
 session_start();
-if (!($_SESSION['admin'] ?? false)) { http_response_code(403); exit('403 Forbidden'); }
+if (!($_SESSION['admin'] ?? false)) {
+    header('Location: login.php');
+    exit;
+}
 
 $banFile     = __DIR__.'/banned.txt';
 $whiteFile   = __DIR__.'/whitelist.txt';
