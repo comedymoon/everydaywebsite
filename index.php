@@ -148,7 +148,7 @@ list($ok_path, $wait_path) = tb_allow("path:$page", 15, 0.7);
 if (!$ok_ip || !$ok_path) {
     http_response_code(429);
     header('Retry-After: '.(int)ceil(max($wait_ip, $wait_path)));
-    echo "неа)))";
+    echo "сын шлюхи, съебался с сайта";
     $log = "$time | RLIMIT | $ip | $country | $fullurl | UA:$ua\n";
     @file_put_contents("visits.log",$log,FILE_APPEND);
     @file_put_contents("banned.txt", "$ip\n", FILE_APPEND);
@@ -1001,6 +1001,7 @@ if ($ok_tg && $token && $chat_id) {
     </script>
 </body>
 </html>
+
 
 
 
