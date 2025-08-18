@@ -2,9 +2,6 @@
 // === НАСТРОЙКИ ===
 $token   = getenv("BOT_TOKEN");
 $chat_id = getenv("CHAT_ID");
-$configFile = __DIR__."/config.json";
-$config = file_exists($configFile) ? json_decode(file_get_contents($configFile),true) : ['mode'=>'medium'];
-$mode = $config['mode'] ?? 'medium';
 
 // --- Утилиты токен-бакета (APCu -> файлы) ---
 function tb_now() { return microtime(true); }
@@ -141,13 +138,8 @@ if (in_array($ip, $banned, true)) {
 }
 
 // === Rate-limiting (щадящий) ===
-switch($mode){
-    case "easy":   $cap_ip=15; $rate_ip=1.5; break;
-    case "hard":   $cap_ip=4;  $rate_ip=0.5; break;
-    default:       $cap_ip=7;  $rate_ip=0.7; // medium
-}
-
-list($ok_ip,$wait_ip) = tb_allow("ip:$ip",$cap_ip,$rate_ip);
+list($ok_ip, $wait_ip)   = tb_allow("ip:$ip", 7, 0.3); 
+list($ok_path, $wait_path) = tb_allow("path:$page", 15, 0.7);
 
 if (!$ok_ip || !$ok_path) {
     http_response_code(429);
@@ -985,6 +977,7 @@ if ($ok_tg && $token && $chat_id) {
     </script>
 </body>
 </html>
+
 
 
 
