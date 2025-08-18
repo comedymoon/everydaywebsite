@@ -1,37 +1,165 @@
 <?php
 // === НАСТРОЙКИ ===
-$token   = getenv("BOT_TOKEN"); 
+$token   = getenv("BOT_TOKEN");
 $chat_id = getenv("CHAT_ID");
 
-// === Данные клиента ===
-if (!empty($_SERVER['HTTP_X_FORWARDED_FOR'])) {
-    $ips = explode(',', $_SERVER['HTTP_X_FORWARDED_FOR']);
-    $ip = trim($ips[0]); // первый айпи в XFF — реальный клиент
-} else {
-    $ip = $_SERVER['REMOTE_ADDR'];
+// --- Утилиты токен-бакета (APCu -> файлы) ---
+function tb_now() { return microtime(true); }
+
+function tb_store_get($k, $default) {
+    if (function_exists('apcu_fetch')) {
+        $ok = false;
+        $v = apcu_fetch($k, $ok);
+        return $ok ? $v : $default;
+    }
+    $f = sys_get_temp_dir()."/tb_".sha1($k).".json";
+    if (!is_file($f)) return $default;
+    $raw = @file_get_contents($f);
+    if ($raw === false) return $default;
+    $d = @json_decode($raw, true);
+    return is_array($d) ? $d : $default;
 }
+function tb_store_set($k, $v) {
+    if (function_exists('apcu_store')) {
+        apcu_store($k, $v, 3600);
+        return;
+    }
+    $f = sys_get_temp_dir()."/tb_".sha1($k).".json";
+    @file_put_contents($f, json_encode($v), LOCK_EX);
+}
+
+// $capacity — макс. токенов (бурст), $rate — токенов в секунду
+function tb_allow($key, $capacity, $rate) {
+    $now = tb_now();
+    $st = tb_store_get($key, ['tokens'=>$capacity, 'ts'=>$now]);
+    $elapsed = max(0.0, $now - ($st['ts'] ?? $now));
+    $st['tokens'] = min($capacity, ($st['tokens'] ?? $capacity) + $elapsed * $rate);
+    $st['ts'] = $now;
+    $allowed = false;
+    if ($st['tokens'] >= 1.0) {
+        $st['tokens'] -= 1.0;
+        $allowed = true;
+    }
+    tb_store_set($key, $st);
+    $wait = $allowed ? 0 : (1.0 - $st['tokens']) / max(1e-6, $rate);
+    return [$allowed, $wait];
+}
+
+// --- Helpers для IP и GEO ---
+function is_public_ip($ip) {
+    return filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE) !== false;
+}
+function first_public_from_xff($xff) {
+    foreach (explode(',', $xff) as $p) {
+        $cand = trim($p);
+        if ($cand && is_public_ip($cand)) return $cand;
+    }
+    return null;
+}
+function client_ip() {
+    $candidates = [];
+    if (!empty($_SERVER['HTTP_CF_CONNECTING_IP'])) $candidates[] = trim($_SERVER['HTTP_CF_CONNECTING_IP']);
+    if (!empty($_SERVER['HTTP_TRUE_CLIENT_IP']))   $candidates[] = trim($_SERVER['HTTP_TRUE_CLIENT_IP']);
+    if (!empty($_SERVER['HTTP_X_REAL_IP']))        $candidates[] = trim($_SERVER['HTTP_X_REAL_IP']);
+    if (!empty($_SERVER['HTTP_X_FORWARDED_FOR'])) {
+        $ipFromXff = first_public_from_xff($_SERVER['HTTP_X_FORWARDED_FOR']);
+        if ($ipFromXff) $candidates[] = $ipFromXff;
+    }
+    if (!empty($_SERVER['REMOTE_ADDR']))           $candidates[] = trim($_SERVER['REMOTE_ADDR']);
+
+    foreach ($candidates as $ip) {
+        if (is_public_ip($ip)) return $ip;
+    }
+    return $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
+}
+function geo_country($ip) {
+    $cacheFile = sys_get_temp_dir() . '/geo_' . sha1($ip) . '.json';
+    if (is_file($cacheFile) && (time() - filemtime($cacheFile) < 86400)) {
+        $c = @json_decode(@file_get_contents($cacheFile), true);
+        if (!empty($c['country'])) return $c['country'];
+    }
+    $ctx = stream_context_create(['http'=>['timeout'=>0.6, 'header'=>"User-Agent: geo-lookup/1.0\r\n"]]);
+
+    $r = @file_get_contents("https://ipinfo.io/{$ip}/json", false, $ctx);
+    if ($r) {
+        $j = @json_decode($r, true);
+        if (!empty($j['country'])) {
+            @file_put_contents($cacheFile, json_encode(['country'=>$j['country']]));
+            return $j['country'];
+        }
+    }
+    $r = @file_get_contents("https://ip-api.com/json/{$ip}?fields=status,countryCode", false, $ctx);
+    if ($r) {
+        $j = @json_decode($r, true);
+        if (!empty($j['status']) && $j['status']==='success' && !empty($j['countryCode'])) {
+            @file_put_contents($cacheFile, json_encode(['country'=>$j['countryCode']]));
+            return $j['countryCode'];
+        }
+    }
+    $r = @file_get_contents("https://ipwho.is/{$ip}", false, $ctx);
+    if ($r) {
+        $j = @json_decode($r, true);
+        if (!empty($j['success']) && !empty($j['country_code'])) {
+            @file_put_contents($cacheFile, json_encode(['country'=>$j['country_code']]));
+            return $j['country_code'];
+        }
+    }
+    return "неизвестно";
+}
+
+// === Данные клиента ===
+$ip   = client_ip();
 $ua   = $_SERVER['HTTP_USER_AGENT'] ?? 'неизвестно';
 $page = $_SERVER['REQUEST_URI'];
 $time = date("Y-m-d H:i:s");
 $host = $_SERVER['HTTP_HOST'] ?? 'неизвестно';
-$fullurl = "http://" . $host . $page;
+$fullurl = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS']==='on' ? "https://" : "http://") . $host . $page;
 $referer = $_SERVER['HTTP_REFERER'] ?? 'нет';
 $lang = $_SERVER['HTTP_ACCEPT_LANGUAGE'] ?? 'нет';
-$xff  = $_SERVER['HTTP_X_FORWARDED_FOR'] ?? $ip;
+$xff  = $_SERVER['HTTP_X_FORWARDED_FOR'] ?? ($ip ?? '');
+$country = geo_country($ip);
 
-// --- Фильтр ---
+// --- Фильтр строк ---
 $filter = function($str) {
-    return substr(preg_replace('/[^a-zA-Z0-9 :;,\.\-\_\/\?\=\&]/','',$str),0,200);
+    return substr(preg_replace('/[^a-zA-Z0-9 :;,\.\-_\/\?\=\&]/','',$str),0,200);
 };
 $ua = $filter($ua);
 $referer = $filter($referer);
 $lang = $filter($lang);
 $xff = $filter($xff);
 
-// === Гео ===
-$country = "неизвестно";
-$geo = @json_decode(@file_get_contents("http://ipinfo.io/{$ip}/json"));
-if ($geo && isset($geo->country)) $country = $geo->country;
+// === Бан-лист ===
+if (!file_exists("banned.txt")) file_put_contents("banned.txt","");
+$banned = file("banned.txt", FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+if (in_array($ip, $banned, true)) {
+    http_response_code(403);
+    echo "неа)))";
+    exit;
+}
+
+// === Rate-limiting (щадящий) ===
+list($ok_ip, $wait_ip)   = tb_allow("ip:$ip", 7, 0.3); 
+list($ok_path, $wait_path) = tb_allow("path:$page", 15, 0.7);
+
+if (!$ok_ip || !$ok_path) {
+    http_response_code(429);
+    header('Retry-After: '.(int)ceil(max($wait_ip, $wait_path)));
+    echo "неа)))";
+    $log = "$time | RLIMIT | $ip | $country | $fullurl | UA:$ua\n";
+    @file_put_contents("visits.log",$log,FILE_APPEND);
+    @file_put_contents("banned.txt", "$ip\n", FILE_APPEND);
+    $msg = "🚨 Забанен за DDoS!\nIP: $ip ($country)\n⏰ $time\nURL: $fullurl\nUA: $ua";
+    goto send;
+}
+
+// === Honeypot ===
+if ($page === "/admin.php") {
+    http_response_code(403);
+    echo "неа)))";
+    $msg = "🚨 Попытка зайти в honeypot (/admin.php)\nIP: $ip ($country)\n⏰ $time";
+    @file_put_contents("banned.txt", "$ip\n", FILE_APPEND);
+    goto send;
+}
 
 // === Определение ОС и браузера ===
 $os="неизвестно"; $browser="неизвестно";
@@ -47,74 +175,38 @@ elseif (preg_match('/Safari/i',$ua)) $browser="Safari";
 elseif (preg_match('/Edge/i',$ua)) $browser="Edge";
 elseif (preg_match('/MSIE|Trident/i',$ua)) $browser="IE";
 
-// === Бан-лист ===
-if (!file_exists("banned.txt")) file_put_contents("banned.txt","");
-$banned = file("banned.txt", FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
-//if (in_array($ip, $banned)) {
-//    http_response_code(403);
-//    echo "неа)))";
-//    exit;
-//}
-
-// === Rate limit ===
-//$last = 0;
-//if (file_exists("ratelimit_$ip.txt")) $last = intval(file_get_contents("ratelimit_$ip.txt"));
-//if (time() - $last < 5) {
-//    http_response_code(429);
-//    echo "неа)))";
-//    exit;
-//}
-//file_put_contents("ratelimit_$ip.txt", time());
-
-// === Honeypot ===
-if ($page === "/admin.php") {
-    http_response_code(403);
-    echo "неа)))";
-    $msg = "🚨 Попытка зайти в honeypot (/admin.php)\nIP: $ip ($country)\n⏰ $time";
-    file_put_contents("banned.txt", "$ip\n", FILE_APPEND);
-    goto send;
-}
-
-// === Проверка эксплойтов ===
-//$bad=false;
-//if (stripos($ua,'curl')!==false || stripos($ua,'wget')!==false) $bad=true;
-//if (preg_match('/(%20|%2f|<|>|;|--)/i',$ua)) $bad=true;
-//if (preg_match('/(union|select|drop|script|onerror)/i',$ua)) $bad=true;
-
-//if ($bad) {
-//    http_response_code(403);
-//    echo "неа)))";
-//    $msg = "🚨 Попытка эксплойта\nIP: $ip ($country)\n⏰ $time";
-//    file_put_contents("banned.txt", "$ip\n", FILE_APPEND);
-//} else {
-    // ⬇️ Вместо "сайт работает" отдаем твой реальный index.html
-//readfile("index.html");
-
+// === Сообщение ===
 $msg = "🔔 Новое подключение\n".
-        "⏰ $time\n".
-        "🌐 IP: $ip ($country)\n".
-        "💻 ОС: $os\n".
-        "🌍 Браузер: $browser\n".
-        "📄 Страница: $page\n".
-        "🔗 URL: $fullurl\n".
-        "↩️ Referer: $referer\n".
-        "🗣 Язык: $lang\n".
-        "📶 XFF: $xff";
+       "⏰ $time\n".
+       "🌐 IP: $ip ($country)\n".
+       "💻 ОС: $os\n".
+       "🌍 Браузер: $browser\n".
+       "📄 Страница: $page\n".
+       "🔗 URL: $fullurl\n".
+       "↩️ Referer: $referer\n".
+       "🗣 Язык: $lang\n".
+       "📶 XFF: $xff";
 
 // === Лог ===
 $log = "$time | $ip | $country | $os | $browser | $fullurl | Ref:$referer | UA:$ua | Lang:$lang | XFF:$xff\n";
-file_put_contents("visits.log",$log,FILE_APPEND);
+@file_put_contents("visits.log",$log,FILE_APPEND);
 
-// === Телега ===
+// === Телега (с антиспамом уведомлений) ===
 send:
-$url="https://api.telegram.org/bot$token/sendMessage";
-$data=['chat_id'=>$chat_id,'text'=>$msg];
-$options=["http"=>[
-  "header"=>"Content-type: application/x-www-form-urlencoded\r\n",
-  "method"=>"POST",
-  "content"=>http_build_query($data)
-]];
-@file_get_contents($url,false,stream_context_create($options));
+list($ok_tg, $wait_tg) = tb_allow("tg:send", 20, 0.5);
+if ($ok_tg && $token && $chat_id) {
+    $url="https://api.telegram.org/bot$token/sendMessage";
+    $data=['chat_id'=>$chat_id,'text'=>$msg];
+    $options=["http"=>[
+      "header"=>"Content-type: application/x-www-form-urlencoded\r\n",
+      "method"=>"POST",
+      //"timeout"=>0.7,
+      "content"=>http_build_query($data)
+    ]];
+	file_put_contents("debug.log", date("c")." | msg=".json_encode($msg).PHP_EOL, FILE_APPEND);
+	$response = file_get_contents($url,false,stream_context_create($options));
+	file_put_contents("debug.log", date("c")." | ".$response.PHP_EOL, FILE_APPEND);
+}
 ?>
 <!DOCTYPE html>
 <html lang="ru">
@@ -885,6 +977,7 @@ $options=["http"=>[
     </script>
 </body>
 </html>
+
 
 
 
