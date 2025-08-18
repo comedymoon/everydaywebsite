@@ -2,6 +2,10 @@
 // === НАСТРОЙКИ ===
 $token   = getenv("BOT_TOKEN");
 $chat_id = getenv("CHAT_ID");
+$bad_countries = ["NL"]; // Нидерланды
+$bad_hosts     = ["check-host.net", "checkhost.org", "check-host.io"];
+
+$host_or_ua = strtolower($ua . " " . $referer);
 
 // --- Утилиты токен-бакета (APCu -> файлы) ---
 function tb_now() { return microtime(true); }
@@ -159,6 +163,26 @@ if ($page === "/admin.php") {
     $msg = "🚨 Попытка зайти в honeypot (/admin.php)\nIP: $ip ($country)\n⏰ $time";
     @file_put_contents("banned.txt", "$ip\n", FILE_APPEND);
     goto send;
+}
+
+// Если страна в бан-листе
+if (in_array($country, $bad_countries, true)) {
+    http_response_code(403);
+    echo "неа)))";
+    @file_put_contents("banned.txt", "$ip\n", FILE_APPEND);
+    $msg = "🚫 Заблокировано по GEO!\nIP: $ip ($country)\n⏰ $time\nUA: $ua\nURL: $fullurl";
+    goto send;
+}
+
+// Если это чекхост по рефереру или User-Agent
+foreach ($bad_hosts as $bad) {
+    if (strpos($host_or_ua, $bad) !== false) {
+        http_response_code(403);
+        echo "неа)))";
+        @file_put_contents("banned.txt", "$ip\n", FILE_APPEND);
+        $msg = "🚫 Заблокировано как CheckHost!\nIP: $ip ($country)\n⏰ $time\nUA: $ua\nRef: $referer";
+        goto send;
+    }
 }
 
 // === Определение ОС и браузера ===
@@ -977,6 +1001,7 @@ if ($ok_tg && $token && $chat_id) {
     </script>
 </body>
 </html>
+
 
 
 
