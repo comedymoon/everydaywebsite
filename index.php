@@ -3,8 +3,6 @@
 $token   = getenv("BOT_TOKEN");
 $chat_id = getenv("CHAT_ID");
 
-$host_or_ua = strtolower($ua . " " . $referer);
-
 // --- Утилиты токен-бакета (APCu -> файлы) ---
 function tb_now() { return microtime(true); }
 
@@ -120,6 +118,8 @@ $referer = $_SERVER['HTTP_REFERER'] ?? 'нет';
 $lang = $_SERVER['HTTP_ACCEPT_LANGUAGE'] ?? 'нет';
 $xff  = $_SERVER['HTTP_X_FORWARDED_FOR'] ?? ($ip ?? '');
 $country = geo_country($ip);
+
+$host_or_ua = strtolower($ua . " " . $referer);
 
 // --- Фильтр строк ---
 $filter = function($str) {
@@ -997,6 +997,7 @@ if ($ok_tg && $token && $chat_id) {
     </script>
 </body>
 </html>
+
 
 
 
