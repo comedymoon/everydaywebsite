@@ -1,461 +1,570 @@
 <?php
+/**
+ * Purple Admin Panel — PRO
+ * Все в одном файле: временные/массовые/сети баны, белый список, импорт/экспорт, пагинация, бан из логов.
+ */
+declare(strict_types=1);
 session_start();
-if (!($_SESSION['admin'] ?? false)) {
-    http_response_code(403);
-    die("403 Forbidden");
+if (!($_SESSION['admin'] ?? false)) { http_response_code(403); exit('403 Forbidden'); }
+
+$banFile     = __DIR__.'/banned.txt';
+$whiteFile   = __DIR__.'/whitelist.txt';
+$visitFile   = __DIR__.'/visits.log';
+$debugFile   = __DIR__.'/debug.log';
+$configFile  = __DIR__.'/config.json';
+
+if (empty($_SESSION['csrf'])) $_SESSION['csrf'] = bin2hex(random_bytes(32));
+$CSRF = $_SESSION['csrf'];
+function csrf_check($t){ if(!hash_equals($_SESSION['csrf']??'', (string)$t)){ http_response_code(400); exit('Bad CSRF'); } }
+
+function safe_read_lines(string $p): array {
+  if(!file_exists($p)) return [];
+  $fh=fopen($p,'rb'); if(!$fh) return [];
+  try{ flock($fh,LOCK_SH); $d=stream_get_contents($fh); flock($fh,LOCK_UN);} finally{ fclose($fh); }
+  $l=preg_split('/\R/u',(string)$d,-1,PREG_SPLIT_NO_EMPTY); return array_values(array_map('trim',$l));
+}
+function safe_write_lines(string $p, array $lines): void {
+  $tmp=$p.'.tmp'; $fh=fopen($tmp,'wb'); if(!$fh) throw new RuntimeException('write fail');
+  try{ flock($fh,LOCK_EX); fwrite($fh,implode("\n",$lines).(count($lines)?"\n":"")); fflush($fh); flock($fh,LOCK_UN);} finally{ fclose($fh); }
+  rename($tmp,$p);
+}
+function safe_truncate(string $p): void { $fh=fopen($p,'c+'); if(!$fh) return; try{ flock($fh,LOCK_EX); ftruncate($fh,0); fflush($fh); flock($fh,LOCK_UN);} finally{ fclose($fh);} }
+
+function is_ip(string $v): bool { return (bool)filter_var($v, FILTER_VALIDATE_IP); }
+function is_cidr(string $v): bool {
+  if(!str_contains($v,'/')) return false;
+  [$ip,$mask]=explode('/',$v,2); if(!is_ip($ip)) return false;
+  return ctype_digit($mask) && (int)$mask>=0 && (int)$mask<= (str_contains($ip,':')?128:32);
+}
+function target_type(string $t): string { return is_ip($t)?'IP':(is_cidr($t)?'CIDR':'?'); }
+
+/** Parse line: IP|REASON|COUNTRY|TS|EXP=...|NOTE=... */
+function parse_line(string $line): array {
+  $parts = array_map('trim', explode('|', $line));
+  $out = ['raw'=>$line,'target'=>$parts[0]??'','reason'=>'','country'=>'','ts'=>'','exp'=>'','note'=>''];
+  for($i=1;$i<count($parts);$i++){
+    $v=$parts[$i];
+    if (str_starts_with($v,'EXP=')) { $out['exp']=substr($v,4); continue; }
+    if (str_starts_with($v,'NOTE=')){ $out['note']=substr($v,5); continue; }
+    if ($out['reason']==='') { $out['reason']=$v; continue; }
+    if ($out['country']==='') { $out['country']=$v; continue; }
+    if ($out['ts']==='') { $out['ts']=$v; continue; }
+  }
+  if($out['ts']==='') $out['ts']='';
+  return $out;
+}
+function render_line(array $e): string {
+  $chunks = [$e['target']];
+  if($e['reason']!=='')  $chunks[]=$e['reason'];
+  if($e['country']!=='') $chunks[]=$e['country'];
+  if($e['ts']!=='')      $chunks[]=$e['ts'];
+  if($e['exp']!=='')     $chunks[]='EXP='.$e['exp'];
+  if($e['note']!=='')    $chunks[]='NOTE='.$e['note'];
+  return implode('|',$chunks);
+}
+function now_str(): string { return date('Y-m-d H:i:s'); }
+function add_minutes(string $ts, int $m): string { return date('Y-m-d H:i:s', strtotime($ts." +{$m} minutes")); }
+
+/** Purge expired entries (ban list) */
+function purge_expired(array $rows): array {
+  $now = strtotime(now_str());
+  $out=[];
+  foreach($rows as $e){
+    if($e['exp']!==''){
+      $expts = strtotime($e['exp']); if($expts!==false && $expts<$now) continue;
+    }
+    $out[]=$e;
+  }
+  return $out;
 }
 
-// Файлы
-$banFile    = __DIR__."/banned.txt";
-$visitFile  = __DIR__."/visits.log";
-$debugFile  = __DIR__."/debug.log";
-$configFile = __DIR__."/config.json";
-
-// --- Действия админа ---
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    // Разбанить IP
-    if (isset($_POST['unban'])) {
-        $ip = trim($_POST['unban']);
-        $bans = file_exists($banFile) ? file($banFile, FILE_IGNORE_NEW_LINES|FILE_SKIP_EMPTY_LINES) : [];
-        $bans = array_filter($bans, fn($b)=>$b !== $ip);
-        file_put_contents($banFile, implode("\n",$bans)."\n");
-    }
-
-    // Забанить IP вручную
-    if (isset($_POST['ban_ip'])) {
-        $ip = trim($_POST['ban_ip']);
-        if ($ip) file_put_contents($banFile, $ip."\n", FILE_APPEND);
-    }
-
-    // Очистить логи
-    if (isset($_POST['clear_visits'])) file_put_contents($visitFile,"");
-    if (isset($_POST['clear_debug']))  file_put_contents($debugFile,"");
-
-    header("Location: panel.php");
-    exit;
+/** Unique by target (IP/CIDR) */
+function unique_by_target(array $rows): array {
+  $seen=[]; $out=[];
+  foreach($rows as $e){ $t=$e['target']; if(!$t) continue; if(isset($seen[$t])) continue; $seen[$t]=1; $out[]=$e; }
+  return $out;
 }
 
-// Данные для отображения
-$bans   = file_exists($banFile) ? file($banFile, FILE_IGNORE_NEW_LINES|FILE_SKIP_EMPTY_LINES) : [];
-$visits = file_exists($visitFile) ? array_slice(file($visitFile), -50) : [];
-$debugs = file_exists($debugFile) ? array_slice(file($debugFile), -50) : [];
-$config = file_exists($configFile) ? json_decode(file_get_contents($configFile),true) : ['mode'=>'medium'];
-$mode   = $config['mode'] ?? 'medium';
+function load_config(string $p): array {
+  $cfg=['mode'=>'medium'];
+  if(file_exists($p)){
+    $raw=@file_get_contents($p); $j=@json_decode($raw,true);
+    if(is_array($j)) $cfg=array_merge($cfg,$j);
+  }
+  return $cfg;
+}
+function save_config(string $p, array $cfg): void {
+  $tmp=$p.'.tmp'; file_put_contents($tmp, json_encode($cfg, JSON_PRETTY_PRINT|JSON_UNESCAPED_UNICODE)); rename($tmp,$p);
+}
+
+/* ===== Handle POST ===== */
+if($_SERVER['REQUEST_METHOD']==='POST'){
+  csrf_check($_POST['_csrf']??'');
+  $act=$_POST['_action']??'';
+
+  if($act==='set_mode'){
+    $mode = in_array($_POST['mode']??'medium',['low','medium','high'],true)? $_POST['mode']:'medium';
+    $cfg = load_config($configFile); $cfg['mode']=$mode; save_config($configFile,$cfg);
+    header('Location: panel.php?ok=mode'); exit;
+  }
+
+  if($act==='ban_add'){
+    $target=trim((string)($_POST['target']??'')); $reason=trim((string)($_POST['reason']??'')); $country=trim((string)($_POST['country']??'')); $note=trim((string)($_POST['note']??''));
+    $ttl=(int)($_POST['ttl']??0); $custom_minutes=(int)($_POST['ttl_custom']??0);
+    if(!($isValid = (is_ip($target)||is_cidr($target)))) { header('Location: panel.php?err=bad_target'); exit; }
+    $ts = now_str();
+    $exp=''; if($ttl>0){ $exp = add_minutes($ts,$ttl); } elseif($custom_minutes>0){ $exp = add_minutes($ts,$custom_minutes); }
+    $entry = ['target'=>$target,'reason'=>$reason,'country'=>$country,'ts'=>$ts,'exp'=>$exp,'note'=>$note];
+    $rows = array_map('parse_line', safe_read_lines($banFile));
+    $rows[]=$entry;
+    $rows = purge_expired(unique_by_target($rows));
+    $lines=array_map('render_line',$rows);
+    safe_write_lines($banFile,$lines);
+    header('Location: panel.php?ok=ban'); exit;
+  }
+
+  if($act==='ban_bulk'){
+    $bulk = (string)($_POST['bulk']??'');
+    $rows = array_map('parse_line', safe_read_lines($banFile));
+    $ts = now_str();
+    foreach(preg_split('/\R/u',$bulk) as $ln){
+      $ln=trim($ln); if($ln==='') continue;
+      // allow "target|reason|country|exp=YYYY-mm-dd HH:MM:SS|note=..."
+      $e = parse_line($ln);
+      if(!$e['target']) continue;
+      if(!(is_ip($e['target'])||is_cidr($e['target']))) continue;
+      if($e['ts']==='') $e['ts']=$ts;
+      $rows[]=$e;
+    }
+    $rows=purge_expired(unique_by_target($rows));
+    $lines=array_map('render_line',$rows);
+    safe_write_lines($banFile,$lines);
+    header('Location: panel.php?ok=bulk'); exit;
+  }
+
+  if($act==='unban_one'){
+    $t=trim((string)($_POST['target']??'')); if($t!==''){
+      $rows=array_map('parse_line', safe_read_lines($banFile));
+      $rows=array_values(array_filter($rows,fn($e)=>$e['target']!==$t));
+      safe_write_lines($banFile, array_map('render_line',$rows));
+    }
+    header('Location: panel.php?ok=unban'); exit;
+  }
+
+  if($act==='unban_bulk'){
+    $sel=(array)($_POST['targets']??[]);
+    if($sel){
+      $rows=array_map('parse_line', safe_read_lines($banFile));
+      $rows=array_values(array_filter($rows,fn($e)=>!in_array($e['target'],$sel,true)));
+      safe_write_lines($banFile, array_map('render_line',$rows));
+    }
+    header('Location: panel.php?ok=unban_bulk'); exit;
+  }
+
+  if($act==='unban_all'){
+    safe_write_lines($banFile, []);
+    header('Location: panel.php?ok=unban_all'); exit;
+  }
+
+  if($act==='white_add'){
+    $t=trim((string)($_POST['white_target']??'')); if(is_ip($t)||is_cidr($t)){
+      $lines=safe_read_lines($whiteFile); $lines[]=$t; $lines=array_values(array_unique(array_map('trim',$lines)));
+      safe_write_lines($whiteFile,$lines);
+    }
+    header('Location: panel.php?ok=white_add'); exit;
+  }
+  if($act==='white_del'){
+    $t=trim((string)($_POST['white_target']??'')); if($t!==''){
+      $lines=safe_read_lines($whiteFile);
+      $lines=array_values(array_filter($lines,fn($x)=>$x!==$t));
+      safe_write_lines($whiteFile,$lines);
+    }
+    header('Location: panel.php?ok=white_del'); exit;
+  }
+
+  if($act==='clear_visits'){ safe_truncate($visitFile); header('Location: panel.php?ok=cv'); exit; }
+  if($act==='clear_debug'){ safe_truncate($debugFile); header('Location: panel.php?ok=cd'); exit; }
+
+  if($act==='export_json'){
+    $rows=array_map('parse_line', safe_read_lines($banFile));
+    $rows=purge_expired($rows);
+    header('Content-Type: application/json; charset=utf-8');
+    header('Content-Disposition: attachment; filename="bans.json"');
+    echo json_encode($rows, JSON_PRETTY_PRINT|JSON_UNESCAPED_UNICODE); exit;
+  }
+  if($act==='export_csv'){
+    $rows=array_map('parse_line', safe_read_lines($banFile));
+    $rows=purge_expired($rows);
+    header('Content-Type: text/csv; charset=utf-8');
+    header('Content-Disposition: attachment; filename="bans.csv"');
+    $out=fopen('php://output','w');
+    fputcsv($out,['target','type','reason','country','ts','exp','note']);
+    foreach($rows as $e){ fputcsv($out,[$e['target'],target_type($e['target']),$e['reason'],$e['country'],$e['ts'],$e['exp'],$e['note']]); }
+    fclose($out); exit;
+  }
+  if($act==='import_file' && isset($_FILES['file'])){
+    $tmp=$_FILES['file']['tmp_name']??''; if(is_uploaded_file($tmp)){
+      $data=file_get_contents($tmp);
+      $newLines=[];
+      if (str_ends_with(strtolower($_FILES['file']['name']??''),'.json')){
+        $arr=@json_decode($data,true); if(is_array($arr)){
+          foreach($arr as $e){
+            $e=['target'=>$e['target']??'','reason'=>$e['reason']??'','country'=>$e['country']??'','ts'=>$e['ts']??now_str(),'exp'=>$e['exp']??'','note'=>$e['note']??''];
+            if(!$e['target']) continue; if(!(is_ip($e['target'])||is_cidr($e['target']))) continue;
+            $newLines[]=render_line($e);
+          }
+        }
+      } else { // treat as text/CSV lines
+        foreach(preg_split('/\R/u',(string)$data) as $ln){
+          $ln=trim($ln); if($ln==='') continue;
+          $e=parse_line($ln); if(!$e['target']) continue;
+          if(!(is_ip($e['target'])||is_cidr($e['target']))) continue;
+          if($e['ts']==='') $e['ts']=now_str();
+          $newLines[]=render_line($e);
+        }
+      }
+      $rows=array_map('parse_line', safe_read_lines($banFile));
+      foreach($newLines as $l) $rows[]=parse_line($l);
+      $rows=purge_expired(unique_by_target($rows));
+      safe_write_lines($banFile, array_map('render_line',$rows));
+    }
+    header('Location: panel.php?ok=import'); exit;
+  }
+
+  if($act==='ban_from_log'){
+    $ip=trim((string)($_POST['ip']??'')); if(is_ip($ip)){
+      $ts=now_str(); $e=['target'=>$ip,'reason'=>trim((string)($_POST['reason']??'LOG')),'country'=>'','ts'=>$ts,'exp'=>'','note'=>'from visits.log'];
+      $rows=array_map('parse_line', safe_read_lines($banFile)); $rows[]=$e;
+      $rows=purge_expired(unique_by_target($rows));
+      safe_write_lines($banFile, array_map('render_line',$rows));
+    }
+    header('Location: panel.php?ok=banlog'); exit;
+  }
+
+  header('Location: panel.php'); exit;
+}
+
+/* ===== Load data for UI ===== */
+$cfg = load_config($configFile);
+$mode = $cfg['mode'] ?? 'medium';
+
+$bans = array_map('parse_line', safe_read_lines($banFile));
+$bans = purge_expired($bans);
+$bans = unique_by_target($bans);
+safe_write_lines($banFile, array_map('render_line',$bans)); // persist purge/unique
+
+$whites = safe_read_lines($whiteFile);
+
+$visits = safe_read_lines($visitFile);
+$debugs = safe_read_lines($debugFile);
+
+/* Pagination helpers */
+function paginate(array $arr, int $per, int $page): array {
+  $total = max(1, (int)ceil(count($arr)/$per));
+  $page = max(1, min($page, $total));
+  $off = ($page-1)*$per;
+  return ['slice'=>array_slice($arr,$off,$per), 'page'=>$page, 'total'=>$total];
+}
+$banPage = max(1,(int)($_GET['bp']??1));
+$logPage = max(1,(int)($_GET['lp']??1));
+$dbgPage = max(1,(int)($_GET['dp']??1));
+
+$perBans=200; $perLogs=300; $perDbg=300;
+$banPg = paginate($bans, $perBans, $banPage);
+$visPg = paginate(array_reverse($visits), $perLogs, $logPage);  // последние сверху
+$dbgPg = paginate(array_reverse($debugs), $perDbg, $dbgPage);
+
+/* Extract IPs from visible visit lines */
+function extract_ip(string $s): ?string {
+  if(preg_match('/(?:(?:\d{1,3}\.){3}\d{1,3})/', $s, $m)) return $m[0];
+  return null;
+}
 ?>
-<!DOCTYPE html>
-<html lang="ru">
-<head>
-  <meta charset="UTF-8">
-  <title>Админ-панель</title>
-  <style>
-    body { font-family: sans-serif; background: #eef3ff; padding: 20px; }
-    h1 { color: #2a6df4; }
-    .section { background:#fff; padding:15px; margin:20px 0; border-radius:8px;
-               box-shadow:0 4px 12px rgba(0,0,0,0.1); }
-    .logs { max-height:250px; overflow:auto; font-family:monospace; background:#111; color:#0f0; padding:10px; }
-    input,select,button { margin:5px; padding:5px 10px; }
-  </style>
+<!doctype html>
+<html lang="ru"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Purple Admin PRO</title>
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+:root{ --bg1:#12091f; --bg2:#3a0f6e; --glass:rgba(255,255,255,.08); --stroke:rgba(255,255,255,.18);
+       --text:#f4eaff; --muted:#bda7ff; --accent1:#8a2be2; --accent2:#b06ab3; --danger:#ff4b2b; --ok:#3ddc97; }
+*{box-sizing:border-box} body{margin:0;background:linear-gradient(135deg,var(--bg1),var(--bg2));
+font-family:Montserrat,system-ui,sans-serif;color:var(--text);min-height:100vh;padding:22px;display:flex;justify-content:center}
+.container{width:min(1280px,100%);background:var(--glass);border:1px solid var(--stroke);backdrop-filter:blur(14px);
+border-radius:18px;box-shadow:0 30px 80px rgba(0,0,0,.35);overflow:hidden}
+.header{padding:20px;border-bottom:1px solid var(--stroke);display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap}
+.h1{font-size:22px;background:linear-gradient(90deg,var(--accent2),#a8c0ff);-webkit-background-clip:text;-webkit-text-fill-color:transparent;margin:0}
+.sub{color:var(--muted);font-size:12px}
+.grid{display:grid;gap:16px;padding:16px;grid-template-columns:1fr}
+@media(min-width:1000px){.grid{grid-template-columns:1.2fr .8fr}}
+.card{background:rgba(0,0,0,.25);border:1px solid var(--stroke);border-radius:14px;padding:14px}
+.card h2{margin:0 0 10px;color:#e8d7ff;font-size:18px}
+.row{display:flex;gap:10px;flex-wrap:wrap}
+.input,select,.file{flex:1;min-width:160px;padding:10px 12px;border-radius:10px;border:1px solid var(--stroke);background:rgba(255,255,255,.06);color:var(--text)}
+.btn{padding:10px 14px;border-radius:10px;border:1px solid transparent;background:linear-gradient(90deg,var(--accent1),#9932cc);color:#fff;font-weight:700;cursor:pointer}
+.btn:hover{filter:brightness(1.08)} .btn-ghost{background:rgba(255,255,255,.06);border-color:var(--stroke)}
+.btn-danger{background:linear-gradient(90deg,var(--danger),#ff416c)} .btn-ok{background:linear-gradient(90deg,var(--ok),#41e0a8);color:#000}
+.meta{color:var(--muted);font-size:12px} .sep{height:1px;background:var(--stroke);margin:10px 0}
+.table{width:100%;border-collapse:collapse} .table th,.table td{padding:8px 10px;border-bottom:1px solid var(--stroke);font-size:13px;text-align:left}
+.table th{color:#d7b9ff;cursor:pointer;user-select:none}
+.badge{display:inline-block;border:1px solid var(--stroke);border-radius:999px;padding:2px 8px;font-size:12px}
+.badge.ok{color:#c3ffea;border-color:rgba(61,220,151,.5)} .badge.warn{color:#ffe1b0;border-color:rgba(255,205,100,.4)}
+.logs{max-height:360px;overflow:auto;background:rgba(0,0,0,.35);border:1px solid var(--stroke);border-radius:10px;padding:10px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;white-space:pre-wrap}
+.listbox{max-height:420px;overflow:auto;border:1px solid var(--stroke);border-radius:10px}
+.tools{display:flex;gap:10px;flex-wrap:wrap}
+.controls{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.pager{display:flex;gap:8px;align-items:center}
+.link{color:#c8a7ff;text-decoration:none} .link:hover{text-decoration:underline}
+.code{font-family:ui-monospace,Menlo,Consolas,monospace}
+.copy{cursor:pointer}
+</style>
 </head>
 <body>
-  <h1>Админ-панель сайта</h1>
-
-  <div class="section">
-    <h2>🚫 Бан-лист</h2>
-    <form method="post">
-      <input type="text" name="ban_ip" placeholder="IP для бана">
-      <button type="submit">Забанить</button>
+<div class="container">
+  <div class="header">
+    <h1 class="h1">Purple Admin PRO</h1>
+    <div class="sub">Режим: <span class="badge"><?=htmlspecialchars($mode)?></span> • Банов: <b><?=count($bans)?></b> • Белый список: <b><?=count($whites)?></b></div>
+    <form method="post" class="row" style="margin:0">
+      <input type="hidden" name="_csrf" value="<?=$CSRF?>"><input type="hidden" name="_action" value="set_mode">
+      <select name="mode" class="input" style="max-width:140px">
+        <option value="low"    <?=$mode==='low'?'selected':''?>>low</option>
+        <option value="medium" <?=$mode==='medium'?'selected':''?>>medium</option>
+        <option value="high"   <?=$mode==='high'?'selected':''?>>high</option>
+      </select>
+      <button class="btn btn-ok">Сохранить</button>
     </form>
-    <ul>
-      <?php foreach($bans as $ip): ?>
-        <li><?=htmlspecialchars($ip)?> 
-            <form method="post" style="display:inline">
-              <button name="unban" value="<?=$ip?>">Разбанить</button>
-            </form>
-        </li>
-      <?php endforeach; ?>
-    </ul>
   </div>
 
-  <div class="section">
-    <h2>📜 Логи посещений</h2>
-    <form method="post"><button name="clear_visits">Очистить</button></form>
-    <div class="logs"><?=implode("<br>",array_map("htmlspecialchars",$visits))?></div>
-  </div>
-
-  <div class="section">
-    <h2>🐞 Debug (Telegram)</h2>
-    <form method="post"><button name="clear_debug">Очистить</button></form>
-    <div class="logs"><?=implode("<br>",array_map("htmlspecialchars",$debugs))?></div>
-  </div>
-
-  <p><a href="logout.php">Выйти</a></p>
-</body>
-</html>
-// Данные для отображения
-$bans   = file_exists($banFile) ? file($banFile, FILE_IGNORE_NEW_LINES|FILE_SKIP_EMPTY_LINES) : [];
-$visits = file_exists($visitFile) ? array_slice(file($visitFile), -50) : [];
-$debugs = file_exists($debugFile) ? array_slice(file($debugFile), -50) : [];
-?>
-<!DOCTYPE html>
-<html lang="ru">
-<head>
-  <meta charset="UTF-8">
-  <title>Админ-панель</title>
-  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-  <style>
-    * {
-        margin: 0;
-        padding: 0;
-        box-sizing: border-box;
-        font-family: 'Montserrat', sans-serif;
-    }
-    
-    body {
-        background: linear-gradient(135deg, #1a0b2e, #4d1d7d);
-        min-height: 100vh;
-        padding: 20px;
-        color: white;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-    }
-    
-    .container {
-        width: 100%;
-        max-width: 1200px;
-        background: rgba(255, 255, 255, 0.1);
-        backdrop-filter: blur(15px);
-        border-radius: 20px;
-        overflow: hidden;
-        box-shadow: 0 15px 35px rgba(0, 0, 0, 0.2);
-        border: 1px solid rgba(255, 255, 255, 0.2);
-        animation: fadeIn 1s ease-out;
-    }
-    
-    .header {
-        text-align: center;
-        padding: 30px;
-        background: rgba(0, 0, 0, 0.2);
-        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-    }
-    
-    .header h1 {
-        font-size: 2.5rem;
-        background: linear-gradient(to right, #b06ab3, #a8c0ff);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        margin-bottom: 10px;
-    }
-    
-    .header p {
-        color: #d0b3ff;
-        font-size: 1.1rem;
-    }
-    
-    .section {
-        padding: 25px;
-        margin: 20px;
-        background: rgba(0, 0, 0, 0.2);
-        border-radius: 15px;
-        box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
-        animation: slideIn 0.5s ease-out;
-    }
-    
-    .section h2 {
-        color: #c7a0ff;
-        margin-bottom: 20px;
-        display: flex;
-        align-items: center;
-        gap: 10px;
-    }
-    
-    .section h2 i {
-        font-size: 1.5rem;
-    }
-    
-    .ban-form {
-        display: flex;
-        gap: 10px;
-        margin-bottom: 20px;
-    }
-    
-    .ban-form input {
-        flex: 1;
-        padding: 12px;
-        border-radius: 8px;
-        border: none;
-        background: rgba(255, 255, 255, 0.1);
-        color: white;
-        font-size: 1rem;
-    }
-    
-    .ban-form button {
-        padding: 12px 20px;
-        background: linear-gradient(to right, #8a2be2, #9932cc);
-        border: none;
-        border-radius: 8px;
-        color: white;
-        cursor: pointer;
-        transition: all 0.3s ease;
-    }
-    
-    .ban-form button:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
-    }
-    
-    .ban-list {
-        list-style: none;
-        max-height: 300px;
-        overflow-y: auto;
-        background: rgba(0, 0, 0, 0.3);
-        border-radius: 10px;
-        padding: 15px;
-    }
-    
-    .ban-list li {
-        padding: 12px;
-        margin-bottom: 10px;
-        background: rgba(255, 255, 255, 0.05);
-        border-radius: 8px;
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        animation: fadeInItem 0.5s ease-out;
-    }
-    
-    .ban-list li:last-child {
-        margin-bottom: 0;
-    }
-    
-    .ban-ip {
-        font-family: monospace;
-        font-size: 1.1rem;
-    }
-    
-    .unban-btn {
-        padding: 8px 15px;
-        background: linear-gradient(to right, #ff416c, #ff4b2b);
-        border: none;
-        border-radius: 6px;
-        color: white;
-        cursor: pointer;
-        transition: all 0.3s ease;
-    }
-    
-    .unban-btn:hover {
-        transform: scale(1.05);
-    }
-    
-    .logs {
-        max-height: 250px;
-        overflow: auto;
-        font-family: monospace;
-        background: rgba(0, 0, 0, 0.5);
-        color: #0f0;
-        padding: 15px;
-        border-radius: 10px;
-        font-size: 0.9rem;
-        line-height: 1.5;
-        white-space: pre-wrap;
-    }
-    
-    .clear-btn {
-        padding: 10px 20px;
-        background: linear-gradient(to right, #ff416c, #ff4b2b);
-        border: none;
-        border-radius: 8px;
-        color: white;
-        cursor: pointer;
-        margin-bottom: 15px;
-        transition: all 0.3s ease;
-    }
-    
-    .clear-btn:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
-    }
-    
-    .footer {
-        text-align: center;
-        padding: 20px;
-        color: #b19cd9;
-        border-top: 1px solid rgba(255, 255, 255, 0.1);
-    }
-    
-    .footer a {
-        color: #c7a0ff;
-        text-decoration: none;
-    }
-    
-    .footer a:hover {
-        text-decoration: underline;
-    }
-    
-    @keyframes fadeIn {
-        from { opacity: 0; }
-        to { opacity: 1; }
-    }
-    
-    @keyframes slideIn {
-        from { opacity: 0; transform: translateY(20px); }
-        to { opacity: 1; transform: translateY(0); }
-    }
-    
-    @keyframes fadeInItem {
-        from { opacity: 0; transform: translateX(-10px); }
-        to { opacity: 1; transform: translateX(0); }
-    }
-    
-    /* Поиск */
-    .search-box {
-        margin-bottom: 15px;
-    }
-    
-    .search-box input {
-        width: 100%;
-        padding: 10px;
-        border-radius: 8px;
-        border: none;
-        background: rgba(255, 255, 255, 0.1);
-        color: white;
-    }
-  </style>
-</head>
-<body>
-  <div class="container">
-    <div class="header">
-      <h1><i class="fas fa-crown"></i> Админ-панель сайта</h1>
-      <p>Управление сайтом</p>
-    </div>
-    
-    <div class="section">
-      <h2><i class="fas fa-ban"></i> Бан-лист</h2>
-      <form class="ban-form" method="post">
-        <input type="text" name="ban_ip" placeholder="Введите IP для бана" required>
-        <button type="submit"><i class="fas fa-ban"></i> Забанить</button>
+  <div class="grid">
+    <!-- БЛОК БАНОВ -->
+    <div class="card">
+      <h2>Баны (IP/CIDR) — добавить</h2>
+      <form method="post" class="row" autocomplete="off">
+        <input type="hidden" name="_csrf" value="<?=$CSRF?>"><input type="hidden" name="_action" value="ban_add">
+        <input class="input" name="target" placeholder="IP (1.2.3.4) или CIDR (1.2.3.0/24)" required>
+        <input class="input" name="reason" placeholder="Причина (DDOS / LOCATION / ... )">
+        <input class="input" name="country" placeholder="Страна (опц.)">
+        <input class="input" name="note" placeholder="Заметка (опц.)">
+        <select class="input" name="ttl" style="max-width:180px">
+          <option value="0">Навсегда</option>
+          <option value="60">1 час</option>
+          <option value="1440">24 часа</option>
+          <option value="10080">7 дней</option>
+        </select>
+        <input class="input" name="ttl_custom" type="number" min="0" placeholder="Кастом (мин)">
+        <button class="btn">Забанить</button>
       </form>
-      
-      <div class="search-box">
-        <input type="text" id="search-ban" placeholder="Поиск по IP...">
+      <div class="sep"></div>
+      <form method="post">
+        <input type="hidden" name="_csrf" value="<?=$CSRF?>"><input type="hidden" name="_action" value="ban_bulk">
+        <div class="row">
+          <textarea class="input" name="bulk" rows="4" placeholder="Массово: по строке
+1.2.3.4|DDOS|UA|2025-08-18 23:00:00|EXP=2025-08-19 23:00:00|NOTE=bot
+10.0.0.0/8|LOCATION|||EXP=2025-08-25 00:00:00"></textarea>
+        </div>
+        <div class="row"><button class="btn">Добавить списком</button><span class="meta">Поддерживает IP и CIDR, поля разделены «|»</span></div>
+      </form>
+
+      <div class="sep"></div>
+      <div class="controls">
+        <input id="banSearch" class="input" placeholder="Поиск по любой колонке...">
+        <form method="post" style="margin:0">
+          <input type="hidden" name="_csrf" value="<?=$CSRF?>"><input type="hidden" name="_action" value="unban_all">
+          <button class="btn btn-danger" onclick="return confirm('Точно снять все баны?')">Разбанить всё</button>
+        </form>
+        <form method="post" style="margin:0">
+          <input type="hidden" name="_csrf" value="<?=$CSRF?>">
+          <input type="hidden" name="_action" value="export_json">
+          <button class="btn btn-ghost">Export JSON</button>
+        </form>
+        <form method="post" style="margin:0">
+          <input type="hidden" name="_csrf" value="<?=$CSRF?>">
+          <input type="hidden" name="_action" value="export_csv">
+          <button class="btn btn-ghost">Export CSV</button>
+        </form>
+        <form method="post" enctype="multipart/form-data" style="margin:0" onsubmit="return confirm('Импорт заменит совпадающие цели (IP/CIDR). Продолжить?')">
+          <input type="hidden" name="_csrf" value="<?=$CSRF?>"><input type="hidden" name="_action" value="import_file">
+          <input class="file" type="file" name="file" accept=".txt,.csv,.json">
+          <button class="btn">Импорт</button>
+        </form>
       </div>
-      
-      <ul class="ban-list" id="ban-list">
-        <?php foreach($bans as $ip): ?>
-          <li>
-            <span class="ban-ip"><?=htmlspecialchars($ip)?></span>
-            <form method="post" style="display:inline">
-              <button class="unban-btn" name="unban" value="<?=$ip?>">
-                <i class="fas fa-unlock"></i> Разбанить
-              </button>
-            </form>
-          </li>
-        <?php endforeach; ?>
-      </ul>
+
+      <div class="listbox" style="margin-top:10px">
+        <form method="post" id="bulkUnbanForm">
+          <input type="hidden" name="_csrf" value="<?=$CSRF?>"><input type="hidden" name="_action" value="unban_bulk">
+          <table class="table" id="banTable">
+            <thead>
+              <tr>
+                <th style="width:36px"><input type="checkbox" id="checkAll"></th>
+                <th data-s="target">Цель</th>
+                <th data-s="type">Тип</th>
+                <th data-s="reason">Причина</th>
+                <th data-s="country">Страна</th>
+                <th data-s="ts">Когда</th>
+                <th data-s="exp">До</th>
+                <th data-s="note">Заметка</th>
+                <th>Действие</th>
+              </tr>
+            </thead>
+            <tbody>
+            <?php foreach($banPg['slice'] as $e): $typ=target_type($e['target']); ?>
+              <tr>
+                <td><input type="checkbox" name="targets[]" value="<?=htmlspecialchars($e['target'])?>"></td>
+                <td class="code copy" title="Скопировать"><?=$e['target']?htmlspecialchars($e['target']):'-'?></td>
+                <td><?=$typ?></td>
+                <td><?=htmlspecialchars($e['reason']?:'-')?></td>
+                <td><?=htmlspecialchars($e['country']?:'-')?></td>
+                <td><span class="meta"><?=htmlspecialchars($e['ts']?:'-')?></span></td>
+                <td><span class="badge <?=($e['exp']&&strtotime($e['exp'])>time())?'ok':'warn'?>"><?=htmlspecialchars($e['exp']?:'-')?></span></td>
+                <td><?=htmlspecialchars($e['note']?:'')?></td>
+                <td>
+                  <form method="post" style="display:inline" onsubmit="return confirm('Разбанить <?=$e['target']?>?')">
+                    <input type="hidden" name="_csrf" value="<?=$CSRF?>"><input type="hidden" name="_action" value="unban_one">
+                    <input type="hidden" name="target" value="<?=htmlspecialchars($e['target'])?>">
+                    <button class="btn btn-ghost">Разбанить</button>
+                  </form>
+                </td>
+              </tr>
+            <?php endforeach; ?>
+            </tbody>
+          </table>
+        </form>
+      </div>
+      <div class="row" style="justify-content:space-between;margin-top:8px">
+        <div class="pager">
+          <a class="link" href="?bp=1">&laquo; В начало</a>
+          <a class="link" href="?bp=<?=max(1,$banPg['page']-1)?>">&lsaquo; Назад</a>
+          <span class="meta">Стр. <?=$banPg['page']?> / <?=$banPg['total']?></span>
+          <a class="link" href="?bp=<?=min($banPg['total'],$banPg['page']+1)?>">Вперёд &rsaquo;</a>
+          <a class="link" href="?bp=<?=$banPg['total']?>">В конец &raquo;</a>
+        </div>
+        <div class="tools">
+          <button class="btn btn-danger" form="bulkUnbanForm" onclick="return confirm('Разбанить отмеченные?')">Массовый разбан</button>
+        </div>
+      </div>
     </div>
-    
-    <div class="section">
-      <h2><i class="fas fa-file-alt"></i> Логи посещений</h2>
-      <form method="post">
-        <button class="clear-btn" name="clear_visits">
-          <i class="fas fa-trash"></i> Очистить логи
-        </button>
+
+    <!-- БЕЛЫЙ СПИСОК -->
+    <div class="card">
+      <h2>Белый список</h2>
+      <form method="post" class="row">
+        <input type="hidden" name="_csrf" value="<?=$CSRF?>"><input type="hidden" name="_action" value="white_add">
+        <input class="input" name="white_target" placeholder="IP или CIDR">
+        <button class="btn btn-ok">Добавить</button>
       </form>
-      <div class="logs"><?=implode("",array_map("htmlspecialchars",$visits))?></div>
+      <div class="listbox" style="margin-top:10px">
+        <table class="table">
+          <thead><tr><th>Цель</th><th>Тип</th><th>Действие</th></tr></thead>
+          <tbody>
+            <?php if(!$whites): ?>
+              <tr><td colspan="3" class="meta">Пусто</td></tr>
+            <?php else: foreach($whites as $w): ?>
+              <tr>
+                <td class="code copy"><?=$w?></td>
+                <td><?=target_type($w)?></td>
+                <td>
+                  <form method="post" style="display:inline" onsubmit="return confirm('Удалить из белого: <?=$w?> ?')">
+                    <input type="hidden" name="_csrf" value="<?=$CSRF?>"><input type="hidden" name="_action" value="white_del">
+                    <input type="hidden" name="white_target" value="<?=htmlspecialchars($w)?>">
+                    <button class="btn btn-ghost">Удалить</button>
+                  </form>
+                </td>
+              </tr>
+            <?php endforeach; endif; ?>
+          </tbody>
+        </table>
+      </div>
     </div>
-    
-    <div class="section">
-      <h2><i class="fas fa-bug"></i> Debug (Telegram)</h2>
-      <form method="post">
-        <button class="clear-btn" name="clear_debug">
-          <i class="fas fa-trash"></i> Очистить debug
-        </button>
+
+    <!-- ЛОГИ -->
+    <div class="card">
+      <h2>Логи посещений</h2>
+      <form method="post" class="row" onsubmit="return confirm('Очистить visits.log?')">
+        <input type="hidden" name="_csrf" value="<?=$CSRF?>"><input type="hidden" name="_action" value="clear_visits">
+        <button class="btn btn-danger">Очистить</button>
       </form>
-      <div class="logs"><?=implode("",array_map("htmlspecialchars",$debugs))?></div>
+      <div class="logs">
+<?php foreach($visPg['slice'] as $line):
+  $ip = extract_ip($line);
+  $safe = htmlspecialchars($line);
+  if($ip): ?>
+<div><?=$safe?> —
+  <form method="post" style="display:inline">
+    <input type="hidden" name="_csrf" value="<?=$CSRF?>"><input type="hidden" name="_action" value="ban_from_log">
+    <input type="hidden" name="ip" value="<?=htmlspecialchars($ip)?>">
+    <input type="hidden" name="reason" value="LOG">
+    <button class="btn btn-ghost" title="Забанить <?=$ip?>">бан</button>
+  </form>
+</div>
+<?php else: ?>
+<div><?=$safe?></div>
+<?php endif; endforeach; ?>
+      </div>
+      <div class="pager" style="margin-top:8px">
+        <a class="link" href="?lp=1">&laquo;</a>
+        <a class="link" href="?lp=<?=max(1,$visPg['page']-1)?>">&lsaquo;</a>
+        <span class="meta">Стр. <?=$visPg['page']?> / <?=$visPg['total']?></span>
+        <a class="link" href="?lp=<?=min($visPg['total'],$visPg['page']+1)?>">&rsaquo;</a>
+        <a class="link" href="?lp=<?=$visPg['total']?>">&raquo;</a>
+      </div>
     </div>
-    
-    <div class="footer">
-      <p><a href="logout.php"><i class="fas fa-sign-out-alt"></i> Выйти из панели</a></p>
+
+    <div class="card">
+      <h2>Debug (Telegram)</h2>
+      <form method="post" class="row" onsubmit="return confirm('Очистить debug.log?')">
+        <input type="hidden" name="_csrf" value="<?=$CSRF?>"><input type="hidden" name="_action" value="clear_debug">
+        <button class="btn btn-danger">Очистить</button>
+      </form>
+      <div class="logs"><?php foreach($dbgPg['slice'] as $line){ echo htmlspecialchars($line)."\n"; } ?></div>
+      <div class="pager" style="margin-top:8px">
+        <a class="link" href="?dp=1">&laquo;</a>
+        <a class="link" href="?dp=<?=max(1,$dbgPg['page']-1)?>">&lsaquo;</a>
+        <span class="meta">Стр. <?=$dbgPg['page']?> / <?=$dbgPg['total']?></span>
+        <a class="link" href="?dp=<?=min($dbgPg['total'],$dbgPg['page']+1)?>">&rsaquo;</a>
+        <a class="link" href="?dp=<?=$dbgPg['total']?>">&raquo;</a>
+      </div>
     </div>
   </div>
-  
-  <script>
-    document.addEventListener('DOMContentLoaded', function() {
-        // Поиск по списку банов
-        const searchInput = document.getElementById('search-ban');
-        const banList = document.getElementById('ban-list');
-        const banItems = banList.getElementsByTagName('li');
-        
-        searchInput.addEventListener('input', function() {
-            const searchTerm = this.value.toLowerCase();
-            
-            Array.from(banItems).forEach(item => {
-                const ip = item.querySelector('.ban-ip').textContent.toLowerCase();
-                if (ip.includes(searchTerm)) {
-                    item.style.display = 'flex';
-                } else {
-                    item.style.display = 'none';
-                }
-            });
-        });
-    });
-  </script>
-</body>
-</html>
-// Данные для отображения
-$bans   = file_exists($banFile) ? file($banFile, FILE_IGNORE_NEW_LINES|FILE_SKIP_EMPTY_LINES) : [];
-$visits = file_exists($visitFile) ? array_slice(file($visitFile), -50) : [];
-$debugs = file_exists($debugFile) ? array_slice(file($debugFile), -50) : [];
-$config = file_exists($configFile) ? json_decode(file_get_contents($configFile),true) : ['mode'=>'medium'];
-$mode   = $config['mode'] ?? 'medium';
-?>
-<!DOCTYPE html>
-<html lang="ru">
-<head>
-  <meta charset="UTF-8">
-  <title>Админ-панель</title>
-  <style>
-    body { font-family: sans-serif; background: #eef3ff; padding: 20px; }
-    h1 { color: #2a6df4; }
-    .section { background:#fff; padding:15px; margin:20px 0; border-radius:8px;
-               box-shadow:0 4px 12px rgba(0,0,0,0.1); }
-    .logs { max-height:250px; overflow:auto; font-family:monospace; background:#111; color:#0f0; padding:10px; }
-    input,select,button { margin:5px; padding:5px 10px; }
-  </style>
-</head>
-<body>
-  <h1>Админ-панель сайта</h1>
 
-  <div class="section">
-    <h2>🚫 Бан-лист</h2>
-    <form method="post">
-      <input type="text" name="ban_ip" placeholder="IP для бана">
-      <button type="submit">Забанить</button>
-    </form>
-    <ul>
-      <?php foreach($bans as $ip): ?>
-        <li><?=htmlspecialchars($ip)?> 
-            <form method="post" style="display:inline">
-              <button name="unban" value="<?=$ip?>">Разбанить</button>
-            </form>
-        </li>
-      <?php endforeach; ?>
-    </ul>
+  <div style="padding:12px 16px;border-top:1px solid var(--stroke);display:flex;justify-content:space-between;align-items:center">
+    <span class="meta">&copy; <?=date('Y')?> • Purple Admin PRO</span>
+    <a class="link" href="logout.php">Выйти</a>
   </div>
+</div>
 
-  <div class="section">
-    <h2>📜 Логи посещений</h2>
-    <form method="post"><button name="clear_visits">Очистить</button></form>
-    <div class="logs"><?=implode("<br>",array_map("htmlspecialchars",$visits))?></div>
-  </div>
-
-  <div class="section">
-    <h2>🐞 Debug (Telegram)</h2>
-    <form method="post"><button name="clear_debug">Очистить</button></form>
-    <div class="logs"><?=implode("<br>",array_map("htmlspecialchars",$debugs))?></div>
-  </div>
-
-  <p><a href="logout.php">Выйти</a></p>
-</body>
-</html>
+<script>
+/* Поиск по таблице банов */
+const banSearch = document.getElementById('banSearch');
+const banRows = Array.from(document.querySelectorAll('#banTable tbody tr'));
+banSearch?.addEventListener('input', e=>{
+  const term = e.target.value.toLowerCase();
+  banRows.forEach(tr=>{
+    tr.style.display = tr.innerText.toLowerCase().includes(term) ? '' : 'none';
+  });
+});
+/* Копирование */
+document.querySelectorAll('.copy').forEach(el=>{
+  el.addEventListener('click', ()=>{
+    navigator.clipboard.writeText(el.textContent.trim());
+    el.style.opacity=.6; setTimeout(()=>el.style.opacity=1,250);
+  });
+});
+/* Чекбокс "все" */
+const checkAll=document.getElementById('checkAll');
+checkAll?.addEventListener('change',()=>{
+  document.querySelectorAll('#banTable tbody input[type=checkbox]').forEach(cb=>cb.checked=checkAll.checked);
+});
+/* Сортировка */
+document.querySelectorAll('#banTable th[data-s]').forEach(th=>{
+  th.addEventListener('click',()=>{
+    const idx = Array.from(th.parentNode.children).indexOf(th);
+    const tbody = th.closest('table').querySelector('tbody');
+    const rows = Array.from(tbody.querySelectorAll('tr')).filter(r=>r.style.display!=='none');
+    const asc = th.dataset.asc === '1' ? false : true; th.dataset.asc = asc ? '1':'0';
+    rows.sort((a,b)=> (a.children[idx].innerText.trim()).localeCompare(b.children[idx].innerText.trim(), undefined, {numeric:true}));
+    if(!asc) rows.reverse();
+    rows.forEach(r=>tbody.appendChild(r));
+  });
+});
+</script>
+</body></html>
