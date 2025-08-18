@@ -213,7 +213,7 @@ $log = "$time | $ip | $country | $os | $browser | $fullurl | Ref:$referer | UA:$
 
 // === Телега (с антиспамом уведомлений) ===
 send:
-list($ok_tg, $wait_tg) = tb_allow("tg:send", 20, 0.5);
+list($ok_tg, $wait_tg) = tb_allow("tg:send", 15, 0.5);
 if ($ok_tg && $token && $chat_id) {
     $url="https://api.telegram.org/bot$token/sendMessage";
     $data=['chat_id'=>$chat_id,'text'=>$msg];
@@ -997,6 +997,7 @@ if ($ok_tg && $token && $chat_id) {
     </script>
 </body>
 </html>
+
 
 
 
