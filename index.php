@@ -2,8 +2,6 @@
 // === НАСТРОЙКИ ===
 $token   = getenv("BOT_TOKEN");
 $chat_id = getenv("CHAT_ID");
-$bad_countries = ["NL"]; // Нидерланды
-$bad_hosts     = ["check-host.net", "checkhost.org", "check-host.io"];
 
 $host_or_ua = strtolower($ua . " " . $referer);
 
@@ -999,6 +997,7 @@ if ($ok_tg && $token && $chat_id) {
     </script>
 </body>
 </html>
+
 
 
 
