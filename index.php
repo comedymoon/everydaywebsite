@@ -137,7 +137,7 @@ if (!file_exists("banned.txt")) file_put_contents("banned.txt","");
 $banned = file("banned.txt", FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
 if (in_array($ip, $banned, true)) {
     http_response_code(403);
-    echo "неа)))";
+    echo "сын шлюхи, съебался с сайта";
     exit;
 }
 
@@ -159,7 +159,7 @@ if (!$ok_ip || !$ok_path) {
 // === Honeypot ===
 if ($page === "/admin.php") {
     http_response_code(403);
-    echo "неа)))";
+    echo "сын шлюхи, съебался с сайта";
     $msg = "🚨 Попытка зайти в honeypot (/admin.php)\nIP: $ip ($country)\n⏰ $time";
     @file_put_contents("banned.txt", "$ip\n", FILE_APPEND);
     goto send;
@@ -168,7 +168,7 @@ if ($page === "/admin.php") {
 // Если страна в бан-листе
 if (in_array($country, $bad_countries, true)) {
     http_response_code(403);
-    echo "неа)))";
+    echo "сын шлюхи, съебался с сайта";
     @file_put_contents("banned.txt", "$ip\n", FILE_APPEND);
     $msg = "🚫 Заблокировано по GEO!\nIP: $ip ($country)\n⏰ $time\nUA: $ua\nURL: $fullurl";
     goto send;
@@ -178,7 +178,7 @@ if (in_array($country, $bad_countries, true)) {
 foreach ($bad_hosts as $bad) {
     if (strpos($host_or_ua, $bad) !== false) {
         http_response_code(403);
-        echo "неа)))";
+        echo "сын шлюхи, съебался с сайта";
         @file_put_contents("banned.txt", "$ip\n", FILE_APPEND);
         $msg = "🚫 Заблокировано как CheckHost!\nIP: $ip ($country)\n⏰ $time\nUA: $ua\nRef: $referer";
         goto send;
@@ -1001,6 +1001,7 @@ if ($ok_tg && $token && $chat_id) {
     </script>
 </body>
 </html>
+
 
 
 
