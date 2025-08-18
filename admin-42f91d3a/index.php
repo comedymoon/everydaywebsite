@@ -1,6 +1,9 @@
 <?php
 session_start();
-require __DIR__ . "/config.php";
+
+$ADMIN_USER  = getenv("ADMIN_USER") ?: "admin";
+$ADMIN_PASS  = getenv("ADMIN_PASS") ?: "password";
+$allowed_ips = explode(",", getenv("ALLOWED_IPS") ?: "127.0.0.1,::1");
 
 $lock_file    = __DIR__ . "/lock.json";
 $max_attempts = 3;
@@ -24,7 +27,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $user = $_POST['user'] ?? "";
     $pass = $_POST['pass'] ?? "";
 
-    if ($user === $ADMIN_USER && password_verify($pass, $ADMIN_PASS_HASH)) {
+    if ($user === $ADMIN_USER && $pass === $ADMIN_PASS) {
         $_SESSION['admin'] = true;
         file_put_contents(__DIR__."/auth.log", date("c")." | $client_ip | SUCCESS\n", FILE_APPEND);
         header("Location: panel.php");
@@ -42,7 +45,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 ?>
-
 <!DOCTYPE html>
 <html lang="ru">
 <head>
