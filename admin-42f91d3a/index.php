@@ -3,15 +3,16 @@ session_start();
 
 $ADMIN_USER  = getenv("ADMIN_USER") ?: "admin";
 $ADMIN_PASS  = getenv("ADMIN_PASS") ?: "password";
-$allowed_ips = explode(",", getenv("ALLOWED_IPS") ?: "127.0.0.1,::1");
+$allowed_ips_raw = getenv("ALLOWED_IPS") ?: "";
+$allowed_ips = array_filter(array_map('trim', explode(",", $allowed_ips_raw)));
 
+$client_ip = $_SERVER['REMOTE_ADDR'] ?? "0.0.0.0";
 $lock_file    = __DIR__ . "/lock.json";
 $max_attempts = 3;
 $lock_time    = 600; // 10 минут
-$client_ip    = $_SERVER['REMOTE_ADDR'];
 
-// Проверка IP
-if (!in_array($client_ip, $allowed_ips)) {
+// Если список не пустой → проверяем, иначе пускаем всех
+if (!empty($allowed_ips) && !in_array($client_ip, $allowed_ips)) {
     http_response_code(403);
     die("403 Forbidden");
 }
