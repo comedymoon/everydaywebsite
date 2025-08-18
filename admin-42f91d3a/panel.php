@@ -9,6 +9,7 @@ if (!($_SESSION['admin'] ?? false)) {
 $banFile    = __DIR__."/banned.txt";
 $visitFile  = __DIR__."/visits.log";
 $debugFile  = __DIR__."/debug.log";
+$configFile = __DIR__."/config.json";
 
 // --- Действия админа ---
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -34,6 +35,62 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     exit;
 }
 
+// Данные для отображения
+$bans   = file_exists($banFile) ? file($banFile, FILE_IGNORE_NEW_LINES|FILE_SKIP_EMPTY_LINES) : [];
+$visits = file_exists($visitFile) ? array_slice(file($visitFile), -50) : [];
+$debugs = file_exists($debugFile) ? array_slice(file($debugFile), -50) : [];
+$config = file_exists($configFile) ? json_decode(file_get_contents($configFile),true) : ['mode'=>'medium'];
+$mode   = $config['mode'] ?? 'medium';
+?>
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <title>Админ-панель</title>
+  <style>
+    body { font-family: sans-serif; background: #eef3ff; padding: 20px; }
+    h1 { color: #2a6df4; }
+    .section { background:#fff; padding:15px; margin:20px 0; border-radius:8px;
+               box-shadow:0 4px 12px rgba(0,0,0,0.1); }
+    .logs { max-height:250px; overflow:auto; font-family:monospace; background:#111; color:#0f0; padding:10px; }
+    input,select,button { margin:5px; padding:5px 10px; }
+  </style>
+</head>
+<body>
+  <h1>Админ-панель сайта</h1>
+
+  <div class="section">
+    <h2>🚫 Бан-лист</h2>
+    <form method="post">
+      <input type="text" name="ban_ip" placeholder="IP для бана">
+      <button type="submit">Забанить</button>
+    </form>
+    <ul>
+      <?php foreach($bans as $ip): ?>
+        <li><?=htmlspecialchars($ip)?> 
+            <form method="post" style="display:inline">
+              <button name="unban" value="<?=$ip?>">Разбанить</button>
+            </form>
+        </li>
+      <?php endforeach; ?>
+    </ul>
+  </div>
+
+  <div class="section">
+    <h2>📜 Логи посещений</h2>
+    <form method="post"><button name="clear_visits">Очистить</button></form>
+    <div class="logs"><?=implode("<br>",array_map("htmlspecialchars",$visits))?></div>
+  </div>
+
+  <div class="section">
+    <h2>🐞 Debug (Telegram)</h2>
+    <form method="post"><button name="clear_debug">Очистить</button></form>
+    <div class="logs"><?=implode("<br>",array_map("htmlspecialchars",$debugs))?></div>
+  </div>
+
+  <p><a href="logout.php">Выйти</a></p>
+</body>
+</html>
 // Данные для отображения
 $bans   = file_exists($banFile) ? file($banFile, FILE_IGNORE_NEW_LINES|FILE_SKIP_EMPTY_LINES) : [];
 $visits = file_exists($visitFile) ? array_slice(file($visitFile), -50) : [];
