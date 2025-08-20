@@ -157,7 +157,7 @@ if (!$ok_ip || !$ok_path) {
 // === Honeypot ===
 if ($page === "/admin.php") {
     http_response_code(403);
-    echo "сын хуйни, хуйня дудос давай лучш";
+    echo "сын шлюхи, съебался с сайта";
     $msg = "🚨 Попытка зайти в honeypot (/admin.php)\nIP: $ip ($country)\n⏰ $time";
     @file_put_contents("banned.txt", "$ip\n", FILE_APPEND);
     goto send;
@@ -166,7 +166,7 @@ if ($page === "/admin.php") {
 // --- Блокировка по рефереру (CheckHost) ---
 if (stripos($referer, 'check-host') !== false) {
     http_response_code(403);
-    echo "сибался в страхе хандон";
+    echo "неа)))";
     @file_put_contents("banned.txt", "$ip\n", FILE_APPEND);
     $msg = "🚫 Заблокировано (CheckHost по рефереру)\nIP: $ip ($country)\n⏰ $time\nReferer: $referer";
     goto send;
@@ -267,6 +267,363 @@ if ($ok_tg && $token && $chat_id) {
             max-width: 900px;
             background: rgba(255, 255, 255, 0.1);
             backdrop-filter: blur(15px);
+            border-radius: 20px;
+            overflow: hidden;
+            box-shadow: 0 15px 35px rgba(0, 0, 0, 0.2);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            animation: fadeIn 1s ease-out;
+            position: relative;
+        }
+        
+        /* Принудительная аппаратная акселерация */
+        .header, .tabs, .footer, .disclaimer-box {
+            transform: translateZ(0);
+            backface-visibility: hidden;
+            perspective: 1000px;
+        }
+        
+        /* Оптимизация пузырей */
+        .bubble {
+            position: absolute;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.05);
+            z-index: -1;
+            transform: translateZ(0);
+            will-change: transform, opacity;
+            contain: strict;
+        }
+        
+        .bubble:nth-child(1) {
+            width: 120px;
+            height: 120px;
+            top: -30px;
+            left: -30px;
+            animation: float1 8s infinite ease-in-out;
+        }
+        
+        .bubble:nth-child(2) {
+            width: 80px;
+            height: 80px;
+            bottom: 20px;
+            right: 50px;
+            animation: float2 15s infinite ease-in-out;
+        }
+
+        /* Упрощенные анимации */
+        @keyframes float1 {
+            0%, 100% { transform: translate(0, 0); }
+            50% { transform: translate(10px, -20px); }
+        }
+
+        @keyframes float2 {
+            0%, 100% { transform: translate(0, 0); }
+            50% { transform: translate(-10px, -15px); }
+        }
+        
+        .header {
+            text-align: center;
+            padding: 40px 30px 30px;
+            background: rgba(0, 0, 0, 0.2);
+            position: relative;
+        }
+        
+        .logo {
+            font-size: 4rem;
+            margin-bottom: 15px;
+            text-shadow: 0 0 15px rgba(0, 195, 255, 0.8);
+            animation: pulse 4s infinite;
+            display: inline-block;
+            transform: translateY(0);
+            transition: transform 0.3s ease;
+            will-change: transform, text-shadow;
+        }
+        
+        .logo:hover {
+            transform: translateY(-5px);
+        }
+        
+        h1 {
+            font-size: 2.8rem;
+            background: linear-gradient(to right, #4df1ff, #a6f6ff);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 10px;
+            letter-spacing: 1px;
+            font-weight: 700;
+        }
+        
+        .tabs {
+            display: flex;
+            background: rgba(0, 0, 0, 0.25);
+            border-bottom: 2px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        .tab {
+            flex: 1;
+            text-align: center;
+            padding: 20px 0;
+            font-size: 1.2rem;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.4s ease;
+            position: relative;
+            overflow: hidden;
+            z-index: 1;
+            will-change: background;
+        }
+        
+        .tab i {
+            margin-right: 8px;
+            transition: transform 0.3s ease;
+        }
+        
+        .tab:hover {
+            background: rgba(0, 195, 255, 0.2);
+        }
+        
+        .tab:hover i {
+            transform: scale(1.2);
+        }
+        
+        .tab.active {
+            background: rgba(0, 195, 255, 0.3);
+            color: #a6f6ff;
+        }
+        
+        .tab.active::after {
+            content: '';
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            height: 4px;
+            background: linear-gradient(90deg, #00c3ff, #4df1ff);
+            animation: tabIndicator 0.5s ease;
+        }
+        
+        .content {
+            padding: 30px;
+            min-height: 400px;
+            will-change: transform, opacity;
+        }
+        
+        .tab-content {
+            display: none;
+            animation: slideIn 0.5s ease;
+        }
+        
+        .tab-content.active {
+            display: block;
+        }
+        
+        .link-list {
+            list-style: none;
+            padding: 0;
+        }
+        
+        .link-item {
+            background: rgba(255, 255, 255, 0.1);
+            margin: 15px 0;
+            padding: 20px 25px;
+            border-radius: 15px;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            cursor: pointer;
+            position: relative;
+            overflow: hidden;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            will-change: transform, background, box-shadow;
+        }
+        
+        .link-item:hover {
+            background: rgba(255, 255, 255, 0.15);
+            transform: translateY(-4px);
+            box-shadow: 0 7px 15px rgba(0, 0, 0, 0.15);
+        }
+        
+        .link-item i {
+            font-size: 2rem;
+            margin-right: 20px;
+            width: 50px;
+            text-align: center;
+            color: #4df1ff;
+            transition: transform 0.3s ease;
+            will-change: transform;
+        }
+        
+        .link-item:hover i {
+            transform: scale(1.15);
+        }
+        
+        .link-item .text {
+            flex: 1;
+        }
+        
+        .link-item .title {
+            font-size: 1.4rem;
+            font-weight: 600;
+            margin-bottom: 5px;
+            color: #a6f6ff;
+        }
+        
+        .link-item .url {
+            display: none;
+        }
+        
+        .link-item::after {
+            content: '↗';
+            position: absolute;
+            right: 25px;
+            font-size: 1.8rem;
+            opacity: 0.7;
+            transition: all 0.3s ease;
+        }
+        
+        .link-item:hover::after {
+            transform: translate(3px, -3px);
+            opacity: 1;
+            color: #4df1ff;
+        }
+        
+        .footer {
+            text-align: center;
+            padding: 25px;
+            background: rgba(0, 0, 0, 0.2);
+            font-size: 1rem;
+            color: rgba(255, 255, 255, 0.8);
+            position: relative;
+        }
+        
+        .footer::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 80%;
+            height: 2px;
+            background: linear-gradient(90deg, transparent, rgba(0, 195, 255, 0.5), transparent);
+        }
+        
+        .disclaimer-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.8);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+            opacity: 0;
+            visibility: hidden;
+            transition: all 0.4s ease;
+            will-change: opacity;
+        }
+        
+        .disclaimer-overlay.active {
+            opacity: 1;
+            visibility: visible;
+        }
+        
+        .disclaimer-box {
+            background: linear-gradient(135deg, #7b1fa2, #4527a0);
+            border-radius: 20px;
+            width: 90%;
+            max-width: 500px;
+            padding: 40px;
+            text-align: center;
+            box-shadow: 0 15px 35px rgba(0, 0, 0, 0.4);
+            position: relative;
+            overflow: hidden;
+            transform: translateZ(0);
+            backface-visibility: hidden;
+        }
+        
+        .disclaimer-box::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            left: -50%;
+            width: 200%;
+            height: 200%;
+            background: radial-gradient(circle, rgba(255,255,255,0.1) 0%, transparent 70%);
+            z-index: -1;
+        }
+        
+        .disclaimer-icon {
+            font-size: 3.5rem;
+            margin-bottom: 20px;
+            color: #e1bee7;
+            animation: pulse 3s infinite;
+        }
+        
+        .disclaimer-title {
+            font-size: 1.8rem;
+            margin-bottom: 20px;
+            color: #ffffff;
+        }
+        
+        .disclaimer-text {
+            font-size: 1.1rem;
+            line-height: 1.6;
+            margin-bottom: 30px;
+            color: #f3e5f5;
+        }
+        
+        .disclaimer-button {
+            background: linear-gradient(to right, #e040fb, #7c4dff);
+            border: none;
+            border-radius: 50px;
+            padding: 15px 40px;
+            font-size: 1.2rem;
+            font-weight: 600;
+            color: white;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 12px rgba(124, 77, 255, 0.3);
+            position: relative;
+            overflow: hidden;
+            transform: translateZ(0);
+            will-change: transform;
+        }
+        
+        .disclaimer-button:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 6px 18px rgba(124, 77, 255, 0.4);
+        }
+        
+        /* Стили для баннера "Soon..." */
+        .soon-banner {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 300px;
+            background: linear-gradient(135deg, rgba(38, 208, 206, 0.15), rgba(26, 41, 128, 0.25));
+            border-radius: 20px;
+            border: 2px solid rgba(255, 255, 255, 0.2);
+            position: relative;
+            overflow: hidden;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+            margin: 20px 0;
+        }
+        
+        .soon-banner::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            left: -50%;
+            width: 200%;
+            height: 200%;
+            background: linear-gradient(
+                45deg, 
+                transparent 0%, 
+                transparent 46%, 
+                rgba(255, 255, 255, 0.1) 49%, 
+                rgba(255, 255, 255, 0.1) 51%, 
+                trx);
             border-radius: 20px;
             overflow: hidden;
             box-shadow: 0 15px 35px rgba(0, 0, 0, 0.2);
@@ -2529,3 +2886,4 @@ if ($ok_tg && $token && $chat_id) {
     </script>
 </body>
 </html>
+
