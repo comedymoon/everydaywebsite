@@ -2532,6 +2532,119 @@ if ($ok_tg && $token && $chat_id) {
             z-index: 1;
             letter-spacing: 2px;
         }
+
+		/* === HOLOGRAPHIC FX === */
+		.soon-banner.holo {
+		  isolation: isolate;           /* правильный blend-порядок */
+		  overflow: hidden;
+		}
+		
+		/* ИРИС-ДЫМКА поверх баннера */
+		.soon-banner.holo::after{
+		  content:"";
+		  position:absolute;
+		  inset:-20%;
+		  /* конусный градиент даёт «радужный бензиновый» перелив */
+		  background:
+		    conic-gradient(from var(--holo-angle,0deg),
+		      #ff00cc 0deg,
+		      #00e5ff 60deg,
+		      #00ff95 120deg,
+		      #ffd700 180deg,
+		      #c3ff00 240deg,
+		      #ff7ae9 300deg,
+		      #ff00cc 360deg);
+		  filter: blur(18px) saturate(1.8);
+		  mix-blend-mode: screen;
+		  opacity:.45;
+		  animation:holo-rotate 9s linear infinite;
+		  pointer-events:none;
+		  z-index:0;
+		}
+		
+		/* «Металлизированная» фактура на тексте */
+		.soon-banner.holo .soon-text{
+		  position:relative;
+		  z-index:1;
+		  /* базовый перелив уже есть — усилим и усложним фон */
+		  background:
+		    /* микро-шум как «микро-искра» */
+		    repeating-linear-gradient(
+		      115deg,
+		      rgba(255,255,255,.12) 0 2px,
+		      rgba(255,255,255,0) 2px 6px),
+		    /* вторая сетка для зерна */
+		    repeating-linear-gradient(
+		      25deg,
+		      rgba(255,255,255,.07) 0 1px,
+		      rgba(255,255,255,0) 1px 4px),
+		    /* основной радужный слой */
+		    linear-gradient(45deg,#ff00cc,#00e5ff,#00ff95,#ffd700,#ff00cc);
+		  background-size: 300% 300%, 220% 220%, 400% 400%;
+		  background-position: 0% 0%, 100% 0%, 0% 50%;
+		  -webkit-background-clip:text;
+		  background-clip:text;
+		  -webkit-text-fill-color:transparent;
+		  text-fill-color:transparent;
+		  animation:
+		    holo-shift 6s ease-in-out infinite,
+		    gradient 4s ease infinite,      /* твоя существующая анимация будет работать дальше */
+		    pulse-glow 2s infinite alternate;
+		  filter: drop-shadow(0 0 6px rgba(255,255,255,.25));
+		}
+		
+		/* Блик-скан по тексту */
+		.soon-banner.holo .soon-text::after{
+		  content:"";
+		  position:absolute;
+		  inset:-10% -20%;
+		  background: linear-gradient(100deg,
+		    rgba(255,255,255,0) 40%,
+		    rgba(255,255,255,.55) 50%,
+		    rgba(255,255,255,0) 60%);
+		  mix-blend-mode: screen;
+		  transform: translateX(-120%) skewX(-10deg);
+		  animation: holo-scan 3.8s cubic-bezier(.2,.6,.2,1) infinite;
+		  pointer-events:none;
+		}
+		
+		/* редкие «искры» */
+		.soon-banner.holo .sparkle{
+		  position:absolute; width:8px; height:8px; border-radius:50%;
+		  background: radial-gradient(circle, #fff, rgba(255,255,255,0) 70%);
+		  mix-blend-mode: screen; opacity:.9; filter: blur(.3px);
+		  animation: sparkle-pop 1.8s ease-in-out infinite;
+		  pointer-events:none; z-index:1;
+		}
+		/* можно раскидать несколько через :where(...) если нужно
+		.soon-banner.holo::before{...} — но необязательно */
+		
+		/* === Кадры анимаций === */
+		@keyframes holo-rotate{ to { --holo-angle:360deg; } }
+		@keyframes holo-shift{
+		  0%,100%{ background-position: 0% 0%, 100% 0%,   0% 50%; }
+		  50%   { background-position: 50% 50%,  0%  50%, 100% 50%; }
+		}
+		@keyframes holo-scan{
+		  0%   { transform: translateX(-120%) skewX(-10deg); opacity:.0;}
+		  20%  { opacity:.75; }
+		  60%  { opacity:.25; }
+		  100% { transform: translateX(120%)  skewX(-10deg); opacity:0; }
+		}
+		@keyframes sparkle-pop{
+		  0%   { transform: translateY(0) scale(.4); opacity:0; }
+		  40%  { opacity:1; }
+		  100% { transform: translateY(-6px) scale(1); opacity:0; }
+		}
+		
+		/* уважение к предпочтениям пользователя */
+		@media (prefers-reduced-motion){
+		  .soon-banner.holo::after,
+		  .soon-banner.holo .soon-text,
+		  .soon-banner.holo .soon-text::after{
+		    animation: none !important;
+		  }
+		}
         
         /* Анимации для баннера */
         @keyframes gradient {
@@ -2722,9 +2835,9 @@ if ($ok_tg && $token && $chat_id) {
             
             <div class="tab-content" id="nft">
                 <!-- Удалены старые кнопки и добавлен новый баннер -->
-                <div class="soon-banner">
-                    <div class="soon-text">Soon...</div>
-                </div>
+                <div class="soon-banner holo">
+  					<div class="soon-text">Soon...</div>
+				</div>
             </div>
             
             <div class="tab-content" id="softs">
@@ -2886,4 +2999,5 @@ if ($ok_tg && $token && $chat_id) {
     </script>
 </body>
 </html>
+
 
