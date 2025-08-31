@@ -8,9 +8,15 @@ session_start();
 if (!($_SESSION['admin'] ?? false)) {
     header('Location: login.php');
     exit;
+}
 
-$rootDir = dirname(__DIR__);
-$configFile = $rootDir . '/storage/config.json';
+$rootDir   = dirname(__DIR__);
+$banFile   = $rootDir.'/storage/banned.txt';
+$whiteFile = $rootDir.'/storage/whitelist.txt';
+$visitFile = $rootDir.'/storage/visits.log';
+$debugFile = $rootDir.'/storage/debug.log';
+$configFile= $rootDir.'/storage/config.json';
+
 function cfg_defaults() {
   return [
     'shield' => ['mode'=>'medium','ttl'=>3600,'window'=>120,'bind_ua'=>'loose','bind_ip'=>false],
@@ -28,6 +34,7 @@ function cfg_load($path) {
 function cfg_save($path, $data) {
   @file_put_contents($path, json_encode($data, JSON_PRETTY_PRINT|JSON_UNESCAPED_SLASHES), LOCK_EX);
 }
+
 $CFG = cfg_load($configFile);
 if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && ($_POST['_action'] ?? '') === 'save_settings') {
   if (!hash_equals($_SESSION['csrf'] ?? '', $_POST['_csrf'] ?? '')) { http_response_code(403); exit('CSRF token mismatch'); }
@@ -48,16 +55,6 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && ($_POST['_action'] ?? ''
   cfg_save($configFile, $CFG);
   $settings_saved = true;
 }
-
-
-}
-
-$rootDir = dirname(__DIR__);
-$banFile   = $rootDir.'/storage/banned.txt';
-$whiteFile = $rootDir.'/storage/whitelist.txt';
-$visitFile = $rootDir.'/storage/visits.log';
-$debugFile = $rootDir.'/storage/debug.log';
-$configFile  = __DIR__.'/config.json';
 
 if (empty($_SESSION['csrf'])) $_SESSION['csrf'] = bin2hex(random_bytes(32));
 $CSRF = $_SESSION['csrf'];
