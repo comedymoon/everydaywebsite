@@ -142,10 +142,10 @@ $xff = $filter($xff);
 
 // === Бан-лист ===
 if (!file_exists(dirname(__DIR__) . "/storage/banned.txt")) file_put_contents(dirname(__DIR__) . "/storage/banned.txt","");
-$banned = file("banned.txt", FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+$banned = file_lines_or_empty(dirname(__DIR__) . "/storage/banned.txt");
 if (in_array($ip, $banned, true)) {
     http_response_code(403);
-    echo "сын шлюхи, съебался с сайта";
+    echo "вы заблокированы";
     exit;
 }
 
@@ -153,10 +153,19 @@ if (in_array($ip, $banned, true)) {
 list($ok_ip, $wait_ip)   = tb_allow("ip:$ip", 7, 0.3); 
 list($ok_path, $wait_path) = tb_allow("path:$page", 15, 0.7);
 
+// === Бан за подозрительный URL с "?" ===
+if (preg_match('#/\?(=|[A-Za-z0-9]+)?#', $page)) {
+    http_response_code(403);
+    echo "сын шлюхи, твой ддос не поможет";
+    @file_put_contents(dirname(__DIR__) . "/storage/banned.txt", "$ip\n", FILE_APPEND);
+    $msg = "🚨 Забанен за подозрительный URL с '?'\nIP: $ip ($country)\n⏰ $time\nURL: $fullurl\nUA: $ua";
+    goto send;
+}
+
 if (!$ok_ip || !$ok_path) {
     http_response_code(429);
     header('Retry-After: '.(int)ceil(max($wait_ip, $wait_path)));
-    echo "сын шлюхи, съебался с сайта";
+    echo "сын шлюхи, твой ддос не поможет";
     $log = "$time | RLIMIT | $ip | $country | $fullurl | UA:$ua\n";
     @file_put_contents(dirname(__DIR__) . "/storage/visits.log",$log,FILE_APPEND);
     @file_put_contents(dirname(__DIR__) . "/storage/banned.txt", "$ip\n", FILE_APPEND);
@@ -167,7 +176,7 @@ if (!$ok_ip || !$ok_path) {
 // === Honeypot ===
 if ($page === "/admin.php") {
     http_response_code(403);
-    echo "сын шлюхи, съебался с сайта";
+    echo "привет из ханипота!)";
     $msg = "🚨 Попытка зайти в honeypot (/admin.php)\nIP: $ip ($country)\n⏰ $time";
     @file_put_contents(dirname(__DIR__) . "/storage/banned.txt", "$ip\n", FILE_APPEND);
     goto send;
@@ -176,18 +185,19 @@ if ($page === "/admin.php") {
 // --- Блокировка по рефереру (CheckHost) ---
 if (stripos($referer, 'check-host') !== false) {
     http_response_code(403);
-    echo "неа)))";
+    echo "чекхостики запрещены";
     @file_put_contents(dirname(__DIR__) . "/storage/banned.txt", "$ip\n", FILE_APPEND);
     $msg = "🚫 Заблокировано (CheckHost по рефереру)\nIP: $ip ($country)\n⏰ $time\nReferer: $referer";
     goto send;
 }
 
-// --- Блокировка по GEO (Нидерланды) ---
-if ($country === 'NL') {
+// --- Блокировка по GEO ---
+$blockedCountries = ['NL', 'CN', 'KR', 'US'];
+if (in_array($country, $blockedCountries, true)) {
     http_response_code(403);
-    echo "неа)))";
+    echo "или ддос или впн, похуй";
     @file_put_contents(dirname(__DIR__) . "/storage/banned.txt", "$ip\n", FILE_APPEND);
-    $msg = "🚫 Заблокировано (страна NL)\nIP: $ip ($country)\n⏰ $time\nUA: $ua\nURL: $fullurl";
+    $msg = "🚫 Заблокировано (страна из списка)\nIP: $ip ($country)\n⏰ $time\nUA: $ua\nURL: $fullurl";
     goto send;
 }
 
