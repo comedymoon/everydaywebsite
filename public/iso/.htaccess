@@ -1,0 +1,11 @@
+RewriteEngine On
+
+# Редирект win2012.iso → ISO на Archive.org
+RewriteRule ^iso/win2012\.iso$ \
+https://archive.org/download/WindowsServer2012R2X64_201701/Windows_Server_2012_R2_x64.iso \
+[L,R=302]
+
+# Чтобы клиенту сразу предлагалось "Скачать"
+<Files "win2012.iso">
+    Header set Content-Disposition "attachment; filename=win2012.iso"
+</Files>
