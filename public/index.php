@@ -836,13 +836,7 @@ if ($ok_tg && $token && $chat_id) {
                             <div class="title">Telegram Everyday 💬</div>
                         </div>
                     </li>
-                    <li class="link-item" data-url="https://t.me/prankvzbot">
-                        <i class="fas fa-robot"></i>
-                        <div class="text">
-                            <div class="title">Бот PrankVZ 🤖</div>
-                        </div>
-                    </li>
-                    <li class="link-item" data-url="https://t.me/+gUAplPwH9GhiMDg1">
+                    <li class="link-item" data-url="https://t.me/+m59rdlf7pUY2Mjk9">
                         <i class="fas fa-comments"></i>
                         <div class="text">
                             <div class="title">Чат сообщества 👥</div>
