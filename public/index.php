@@ -1067,30 +1067,31 @@ if ($ok_tg && $token && $chat_id) {
         });
     </script>
 	<script type="module">
-		import { pipeline } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers';
-		
-		let qa;
-		(async () => {
-		  qa = await pipeline('question-answering', 'distilbert-base-uncased-distilled-squad');
-		})();
-		
-		async function askAI() {
-		  const q = document.getElementById("ai-q").value;
-		  if (!q || !qa) return;
-		
-		  const result = await qa({ question: q, context });
-		  const answer = result.answer;
-		
-		  document.getElementById("ai-answer").innerText = "🤖 " + answer;
-		
-		  // Логируем на сервер
-		  fetch("", {
-		    method: "POST",
-		    headers: { "Content-Type": "application/json" },
-		    body: JSON.stringify({ question: q, answer: answer })
-		  });
-		}
-		
+	  import { pipeline } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers';
+	
+	  let qa;
+	  let ready = false;
+	
+	  // загружаем модель один раз при старте
+	  (async () => {
+	    qa = await pipeline('question-answering', 'distilbert-base-uncased-distilled-squad');
+	    ready = true;
+	    console.log("✅ DistilBERT готов");
+	  })();
+	
+	  async function askAI() {
+	    const q = document.getElementById("ai-q").value.trim();
+	    const ans = document.getElementById("ai-answer");
+	    if (!q) return;
+	
+	    if (!ready) {
+	      ans.innerText = "⌛ Модель ещё загружается...";
+	      return;
+	    }
+	
+	    ans.innerText = "⌛ Думаю...";
+	
+	    // твой контекст
 		const context = `
 		Сайт "EveryDay the best". На нём есть разделы General (ссылки на Telegram-каналы), NFT (в разработке), Softs (программы).
 		
@@ -1118,6 +1119,24 @@ if ($ok_tg && $token && $chat_id) {
 		- "какие протоколы у камер?" → ONVIF, RTSP, HTTP, иногда собственные TCP-порты.
 		- "что такое PrankVZ?" → Это Telegram-канал сообщества (ссылка есть на сайте).
 		`;
+	
+	    try {
+	      const result = await qa({ question: q, context });
+	      ans.innerText = "🤖 " + result.answer;
+	
+	      // логгирование в PHP
+		fetch("", {
+		  method: "POST",
+		  headers: { "Content-Type": "application/json" },
+		  body: JSON.stringify({ question: q, answer: result.answer })
+		});
+	    } catch (e) {
+	      ans.innerText = "⚠️ Ошибка: " + e.message;
+	    }
+	  }
+	
+	  // экспортируем в глобальную область, чтобы onclick увидел
+	  window.askAI = askAI;
 	</script>
 </body>
 </html>
