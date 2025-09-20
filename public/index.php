@@ -9,6 +9,50 @@ if (!function_exists('file_lines_or_empty')) {
 
 require __DIR__ . '/shield/guard.php';
 
+// === Логгирование вопросов и ответов ИИ в Телеграм ===
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && 
+    isset($_SERVER['CONTENT_TYPE']) && 
+    strpos($_SERVER['CONTENT_TYPE'], 'application/json') !== false) {
+
+    $raw = file_get_contents("php://input");
+    $data = json_decode($raw, true);
+
+    $q = trim($data['question'] ?? '');
+    $a = trim($data['answer'] ?? '');
+
+    if ($q !== '' && $a !== '') {
+        $time = date("Y-m-d H:i:s");
+        $ip   = client_ip();
+        $country = geo_country($ip);
+
+        // === Телеграм ===
+        if ($token && $chat_id) {
+            $msg = "🤖 Вопрос-Ответ:\n"
+                 . "⏰ $time\n"
+                 . "🌐 IP: $ip ($country)\n"
+                 . "❓ $q\n"
+                 . "💡 $a";
+            $url="https://api.telegram.org/bot$token/sendMessage";
+            $data=['chat_id'=>$chat_id,'text'=>$msg];
+            $options=["http"=>[
+                "header"=>"Content-type: application/x-www-form-urlencoded\r\n",
+                "method"=>"POST",
+                "content"=>http_build_query($data)
+            ]];
+            @file_get_contents($url,false,stream_context_create($options));
+        }
+
+        // === Локальный лог (по желанию) ===
+        $logLine = "$time | IP:$ip ($country) | Q: $q | A: $a\n";
+        @file_put_contents(__DIR__ . "/storage/ai.log", $logLine, FILE_APPEND);
+    }
+
+    // Возврат ответа JS
+    header("Content-Type: application/json");
+    echo json_encode(["ok"=>true]);
+    exit;
+}
+
 // === НАСТРОЙКИ ===
 $token   = getenv("BOT_TOKEN");
 $chat_id = getenv("CHAT_ID");
@@ -888,6 +932,19 @@ if ($ok_tg && $token && $chat_id) {
             <p>@jiarbuz gay</p>
         </div>
     </div>
+
+	<div style="text-align:center; margin:20px;">
+	  <button onclick="document.getElementById('ai-box').style.display='block'" 
+	          style="padding:10px 20px; border:none; background:#0af; color:#fff; border-radius:8px; cursor:pointer;">
+	    🤖 Задать вопрос ИИ
+	  </button>
+	</div>
+	
+	<div id="ai-box" style="display:none; margin:20px; padding:15px; background:#00000055; border-radius:10px;">
+	  <input id="ai-q" type="text" placeholder="Задай вопрос..." style="padding:10px; width:70%">
+	  <button onclick="askAI()" style="padding:10px;">Спросить</button>
+	  <p id="ai-answer" style="margin-top:15px; font-weight:bold;"></p>
+	</div>
     
     <script>
         document.addEventListener('DOMContentLoaded', function() {
@@ -1009,5 +1066,58 @@ if ($ok_tg && $token && $chat_id) {
             });
         });
     </script>
+	<script type="module">
+		import { pipeline } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers';
+		
+		let qa;
+		(async () => {
+		  qa = await pipeline('question-answering', 'distilbert-base-uncased-distilled-squad');
+		})();
+		
+		async function askAI() {
+		  const q = document.getElementById("ai-q").value;
+		  if (!q || !qa) return;
+		
+		  const result = await qa({ question: q, context });
+		  const answer = result.answer;
+		
+		  document.getElementById("ai-answer").innerText = "🤖 " + answer;
+		
+		  // Логируем на сервер
+		  fetch("", {
+		    method: "POST",
+		    headers: { "Content-Type": "application/json" },
+		    body: JSON.stringify({ question: q, answer: answer })
+		  });
+		}
+		
+		const context = `
+		Сайт "EveryDay the best". На нём есть разделы General (ссылки на Telegram-каналы), NFT (в разработке), Softs (программы).
+		
+		Программы на сайте:
+		1. Blue Hikvision 📥 — программа для поиска уязвимостей в камерах Hikvision.
+		   Ссылка: https://drive.google.com/uc?export=download&id=1a4uqsLWD_5vCMNMDmr8Mr0mzh0OmtF6r
+		2. Ingram 📥 — мощный брутфорсер и сканер уязвимостей для всех IP-камер.
+		   Ссылка: https://drive.google.com/uc?export=download&id=1tVPe7sceTvmZJKL5Y0L1IrsgIwWIkUtk
+		3. Generate Pass and User 🔑 — генератор паролей для камер.
+		   Ссылка: https://drive.google.com/uc?export=download&id=1Kl9CvZn2qqTtJUi1toUZKnBKyrOG17Cx
+		4. Noon 🌞 — конвертер: превращает .txt с логинами/паролями от камер в .xml для Dahua SmartPSS.
+		   Ссылка: https://drive.google.com/uc?export=download&id=1PrWY16XUyADSi6K5aT9YmN7xPsHI9Uhk
+		
+		FAQ по камерам:
+		- "как сканить камеры?" → Используй Ingram, вставь список IP, программа проверит доступ и уязвимости.
+		- "как открыть камеру?" → Обычно камеры открываются по RTSP-порту (554) через VLC или другой плеер. Но чаще используется ПО типа SmartPSS (для Dahua) или iVMS (для Hikvision).
+		- "как открыть камеры Hikvision?" → Используй Blue Hikvision, чтобы проверить уязвимости, или программу iVMS-4200 для просмотра.
+		- "как запустить Ingram?" → Скачай Ingram (ссылка выше), вставь IP-адреса камер в список и запусти сканирование.
+		- "а куда вводить айпи камеры?" → В Ingram, он принимает .txt со списком IP.
+		- "как сгенерировать пароль?" → Для этого есть Generate Pass and User.
+		- "что делать если есть логины и пароли?" → Можно открыть камеру через ONVIF или RTSP, либо сконвертировать список в .xml через Noon и подключить в SmartPSS.
+		- "какая программа включает смешные звуки?" → Soundpad (https://store.steampowered.com/app/629520/Soundpad/).
+		- "как смотреть камеры Dahua?" → Через SmartPSS, либо сконвертировать список аккаунтов в .xml через Noon.
+		- "какой стандартный порт камеры?" → Чаще всего 80 (веб), 554 (RTSP), 8000 (Hikvision), 37777 (Dahua).
+		- "какие протоколы у камер?" → ONVIF, RTSP, HTTP, иногда собственные TCP-порты.
+		- "что такое PrankVZ?" → Это Telegram-канал сообщества (ссылка есть на сайте).
+		`;
+	</script>
 </body>
 </html>
